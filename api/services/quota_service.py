@@ -48,6 +48,23 @@ async def check_dograh_quota(
         if quota is insufficient.
     """
     try:
+        # Viato CRM billing gate (embedded "Viato Voice" mode): block the call
+        # when the caller's CRM token balance can't cover it. Fails open on a
+        # CRM outage so a transient hiccup never blocks every call.
+        from api.services.billing.viato_billing import (
+            check_balance_for_user,
+            is_viato_billing_enabled,
+        )
+
+        if is_viato_billing_enabled() and not await check_balance_for_user(user):
+            return QuotaCheckResult(
+                has_quota=False,
+                error_code="quota_exceeded",
+                error_message=(
+                    "Insufficient Viato token balance. Please add tokens to continue."
+                ),
+            )
+
         # Get user configurations
         user_config = await db_client.get_user_configurations(user.id)
 
@@ -99,7 +116,7 @@ async def check_dograh_quota(
                         error_code="quota_exceeded",
                         error_message=(
                             "You have exhausted your trial credits. "
-                            "Please email founders@dograh.com for additional Dograh credits "
+                            "Please contact support@viato.ai for additional credits "
                             "or change providers in Models configurations."
                         ),
                     )

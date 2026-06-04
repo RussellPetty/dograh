@@ -1,4 +1,6 @@
-const DOCS_BASE = "https://docs.dograh.com";
+import { BRAND } from "@/constants/branding";
+
+const DOCS_BASE = BRAND.docsUrl;
 
 export const NODE_DOCUMENTATION_URLS: Record<string, string> = {
     startCall: `${DOCS_BASE}/voice-agent/start-call`,

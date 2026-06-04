@@ -1017,6 +1017,99 @@ async def complete_transfer_function_call(transfer_id: str, request: Request):
     return {"status": "completed", "result": result}
 
 
+class LinkNumberRequest(BaseModel):
+    """Register a Viato-owned Twilio number as an inbound route for this org."""
+
+    account_sid: str
+    auth_token: str
+    phone_number: str
+    label: str | None = None
+    country_code: str | None = None
+    inbound_workflow_id: int | None = None
+    config_name: str | None = None
+
+
+@router.post("/link-number")
+async def link_number(
+    request: LinkNumberRequest, user: UserModel = Depends(get_user)
+):
+    """Bridge a Twilio number owned/provisioned in Viato CRM into Viato Voice.
+
+    Upserts the org's Twilio telephony configuration (keyed by ``account_sid``)
+    and a phone-number row, optionally assigning an inbound agent. Returns the
+    webhook URL the caller (Viato CRM) should point the number's Twilio VoiceUrl
+    at. Idempotent: an existing config/number for the org is reused.
+    """
+    org_id = user.selected_organization_id
+    if not org_id:
+        raise HTTPException(status_code=400, detail="No organization selected")
+
+    # 1. Find or create the Twilio config for this account_sid (org-scoped).
+    configs = await db_client.list_telephony_configurations_by_provider(org_id, "twilio")
+    config = next(
+        (
+            c
+            for c in configs
+            if (c.credentials or {}).get("account_sid") == request.account_sid
+        ),
+        None,
+    )
+    if config is None:
+        config = await db_client.create_telephony_configuration(
+            organization_id=org_id,
+            name=request.config_name or f"Twilio {request.account_sid[-6:]}",
+            provider="twilio",
+            credentials={
+                "account_sid": request.account_sid,
+                "auth_token": request.auth_token,
+                "from_numbers": [request.phone_number],
+            },
+        )
+
+    # 2. Validate the inbound workflow belongs to this org (FK existence is not
+    #    enough — enforce tenant ownership before attaching).
+    if request.inbound_workflow_id is not None:
+        wf = await db_client.get_workflow(
+            request.inbound_workflow_id, organization_id=org_id
+        )
+        if not wf:
+            raise HTTPException(status_code=404, detail="inbound_workflow_not_found")
+
+    # 3. Create the phone-number row, or reuse/repoint an existing one for this org.
+    existing = await db_client.find_active_phone_number_for_inbound(
+        org_id, request.phone_number, "twilio", country_hint=request.country_code
+    )
+    if existing:
+        phone_row = existing
+        if request.inbound_workflow_id is not None:
+            await db_client.update_phone_number(
+                phone_number_id=existing.id,
+                telephony_configuration_id=existing.telephony_configuration_id,
+                inbound_workflow_id=request.inbound_workflow_id,
+            )
+    else:
+        try:
+            phone_row = await db_client.create_phone_number(
+                organization_id=org_id,
+                telephony_configuration_id=config.id,
+                address=request.phone_number,
+                country_code=request.country_code,
+                label=request.label,
+                inbound_workflow_id=request.inbound_workflow_id,
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=409, detail=f"phone_number_create_failed: {e}"
+            )
+
+    backend_endpoint, _ = await get_backend_endpoints()
+    return {
+        "telephony_configuration_id": config.id,
+        "phone_number_id": phone_row.id,
+        "inbound_webhook_url": f"{backend_endpoint}/api/v1/telephony/inbound/run",
+    }
+
+
 # Mount per-provider routers (webhook, status callbacks, answer URLs).
 #
 # Each provider's routes live at ``providers/<name>/routes.py`` and expose

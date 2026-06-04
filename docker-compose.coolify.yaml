@@ -1,0 +1,131 @@
+# Coolify deployment of Viato Voice (dograh), built from source.
+#
+# Differences from docker-compose.yaml (which uses prebuilt images + a bundled
+# nginx/cloudflared "remote" profile):
+#   - api + ui are BUILT from this repo (so this branch's code ships).
+#   - no host port bindings — Coolify's traefik fronts the `nginx` service.
+#   - `nginx` is the single public origin (UI at /, API+WSS at /api/, MinIO at
+#     /voice-audio/); Coolify assigns it a domain via SERVICE_FQDN_NGINX_80.
+#   - AUTH_PROVIDER defaults to `local` (standalone dograh). Set it to `clerk`
+#     (+ CLERK_/model/billing vars) to turn on the embedded Viato Voice mode.
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+
+  redis:
+    image: redis:7
+    command: ["redis-server", "--requirepass", "redissecret"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redissecret", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_API_CORS_ALLOW_ORIGIN: "*"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    environment:
+      ENVIRONMENT: "oss"
+      LOG_LEVEL: "INFO"
+      AUTH_PROVIDER: "${AUTH_PROVIDER:-local}"
+      BACKEND_API_ENDPOINT: "$SERVICE_FQDN_NGINX"
+      DATABASE_URL: "postgresql+asyncpg://postgres:postgres@postgres:5432/postgres"
+      REDIS_URL: "redis://:redissecret@redis:6379"
+      ENABLE_AWS_S3: "false"
+      MINIO_ENDPOINT: "minio:9000"
+      MINIO_PUBLIC_ENDPOINT: "$SERVICE_FQDN_NGINX"
+      MINIO_ACCESS_KEY: "minioadmin"
+      MINIO_SECRET_KEY: "minioadmin"
+      MINIO_BUCKET: "voice-audio"
+      MINIO_SECURE: "false"
+      FASTAPI_WORKERS: "1"
+      OSS_JWT_SECRET: "${OSS_JWT_SECRET}"
+      ENABLE_TELEMETRY: "false"
+      # ── Viato Voice (embedded mode) — set AUTH_PROVIDER=clerk to enable ──
+      CLERK_ISSUER: "${CLERK_ISSUER:-}"
+      CLERK_JWKS_URL: "${CLERK_JWKS_URL:-}"
+      CLERK_AUDIENCE: "${CLERK_AUDIENCE:-}"
+      OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
+      VIATO_VOICE_LLM_MODEL: "${VIATO_VOICE_LLM_MODEL:-openai/gpt-4.1-mini}"
+      DEEPGRAM_API_KEY: "${DEEPGRAM_API_KEY:-}"
+      ELEVENLABS_API_KEY: "${ELEVENLABS_API_KEY:-}"
+      VIATO_BILLING_ENABLED: "${VIATO_BILLING_ENABLED:-false}"
+      VIATO_CRM_URL: "${VIATO_CRM_URL:-}"
+      VOICE_USAGE_WEBHOOK_SECRET: "${VOICE_USAGE_WEBHOOK_SECRET:-}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health').read()\"",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  ui:
+    build:
+      context: .
+      dockerfile: ui/Dockerfile
+    environment:
+      BACKEND_URL: "http://api:8000"
+      NODE_ENV: "oss"
+      ENABLE_TELEMETRY: "false"
+      EMBED_FRAME_ANCESTORS: "${EMBED_FRAME_ANCESTORS:-'self' https://viato.ai https://*.viato.ai}"
+      EMBED_MIC_ALLOWLIST: "${EMBED_MIC_ALLOWLIST:-self \"https://viato.ai\" \"https://app.viato.ai\"}"
+    depends_on:
+      api:
+        condition: service_healthy
+
+  nginx:
+    build:
+      context: .
+      dockerfile: deploy/nginx.Dockerfile
+    environment:
+      # Coolify generates an HTTPS domain and routes it to this service on :80.
+      SERVICE_FQDN_NGINX_80: ""
+    depends_on:
+      - ui
+      - api
+      - minio
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:

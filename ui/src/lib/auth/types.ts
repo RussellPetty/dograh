@@ -16,8 +16,14 @@ export interface LocalUser extends BaseUser {
   provider_id?: string;
 }
 
+// Clerk user type (embedded "Viato Voice" deployment)
+export interface ClerkUser extends BaseUser {
+  provider: 'clerk';
+  organizationId?: string;
+}
+
 // Union type for all user types
-export type AuthUser = CurrentUser | LocalUser;
+export type AuthUser = CurrentUser | LocalUser | ClerkUser;
 
 
 export interface AuthToken {
@@ -30,7 +36,7 @@ export interface TeamPermission {
   id: string;
 }
 
-export type AuthProvider = 'stack' | 'local';
+export type AuthProvider = 'stack' | 'local' | 'clerk';
 
 export interface AuthConfig {
   provider: AuthProvider;

@@ -1,11 +1,39 @@
 import { withSentryConfig } from "@sentry/nextjs";
 import type { NextConfig } from "next";
 
+// Origins allowed to embed Viato Voice (the Viato CRM host) and use the
+// microphone for in-browser test calls. Override via env per deployment.
+const EMBED_FRAME_ANCESTORS =
+  process.env.EMBED_FRAME_ANCESTORS || "'self' https://viato.ai https://*.viato.ai";
+// Permissions-Policy allowlists must be explicit origins (no wildcards).
+const EMBED_MIC_ALLOWLIST =
+  process.env.EMBED_MIC_ALLOWLIST || 'self "https://viato.ai" "https://app.viato.ai"';
+
 const nextConfig: NextConfig = {
   /* config options here */
   output: 'standalone',
   experimental: {
     serverSourceMaps: true,
+  },
+  async headers() {
+    return [
+      {
+        // Allow Viato CRM to embed Viato Voice in an iframe and grant the
+        // microphone for browser-based test calls. No X-Frame-Options is set,
+        // so framing is governed solely by the CSP frame-ancestors directive.
+        source: "/:path*",
+        headers: [
+          {
+            key: "Content-Security-Policy",
+            value: `frame-ancestors ${EMBED_FRAME_ANCESTORS};`,
+          },
+          {
+            key: "Permissions-Policy",
+            value: `microphone=(${EMBED_MIC_ALLOWLIST}), camera=()`,
+          },
+        ],
+      },
+    ];
   },
   async rewrites() {
     return [

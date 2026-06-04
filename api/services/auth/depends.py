@@ -10,7 +10,9 @@ from api.db import db_client
 from api.db.models import UserModel
 from api.enums import PostHogEvent
 from api.schemas.user_configuration import UserConfiguration
+from api.services.auth.clerk_auth import extract_org_provider_id, verify_clerk_token
 from api.services.auth.stack_auth import stackauth
+from api.services.configuration.defaults import build_clerk_default_configuration
 from api.services.configuration.registry import ServiceProviders
 from api.services.posthog_client import capture_event
 from api.utils.auth import decode_jwt_token
@@ -31,6 +33,12 @@ async def get_user(
     # ------------------------------------------------------------------
     if AUTH_PROVIDER == "local":
         return await _handle_oss_auth(authorization)
+
+    # ------------------------------------------------------------------
+    # Clerk auth (embedded "Viato Voice" deployment)
+    # ------------------------------------------------------------------
+    if AUTH_PROVIDER == "clerk":
+        return await _handle_clerk_auth(authorization)
 
     # ------------------------------------------------------------------
     # 1. Validate and fetch the authenticated Stack user
@@ -157,6 +165,85 @@ async def _handle_oss_auth(authorization: str | None) -> UserModel:
         raise
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+
+async def _handle_clerk_auth(authorization: str | None) -> UserModel:
+    """Authenticate via a Clerk session JWT (embedded "Viato Voice" mode).
+
+    Verifies the token against Clerk's JWKS, then maps the Clerk identity onto a
+    Dograh user + organization — mirroring the Stack Auth flow in ``get_user``.
+    """
+    claims = verify_clerk_token(authorization)
+    if not claims:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    clerk_user_id = claims.get("sub")
+    if not clerk_user_id:
+        raise HTTPException(status_code=401, detail="Invalid token: missing subject")
+
+    try:
+        (
+            user_model,
+            user_was_created,
+        ) = await db_client.get_or_create_user_by_provider_id(str(clerk_user_id))
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Error while creating user from database {e}"
+        )
+
+    # Sync email from the token when present.
+    email = claims.get("email")
+    if email and user_model.email != email:
+        await db_client.update_user_email(user_model.id, email)
+        user_model.email = email
+
+    if user_was_created:
+        capture_event(
+            distinct_id=str(clerk_user_id),
+            event=PostHogEvent.SIGNED_UP,
+            properties={"auth_provider": "clerk"},
+        )
+
+    # Resolve the organization: prefer the Clerk org (shared workspace), else
+    # fall back to a per-user org so single-user setups still work.
+    org_provider_id = extract_org_provider_id(claims) or f"org_{clerk_user_id}"
+
+    try:
+        (
+            organization,
+            org_was_created,
+        ) = await db_client.get_or_create_organization_by_provider_id(
+            org_provider_id=org_provider_id, user_id=user_model.id
+        )
+
+        if user_model.selected_organization_id != organization.id:
+            await db_client.add_user_to_organization(user_model.id, organization.id)
+            await db_client.update_user_selected_organization(
+                user_model.id, organization.id
+            )
+            user_model.selected_organization_id = organization.id
+
+            # Seed default model config only when the org was just created, so we
+            # never clobber an existing configuration. In clerk mode we use
+            # Viato-supplied keys (OpenRouter LLM / Deepgram STT / ElevenLabs TTS)
+            # rather than the Dograh MPS service keys.
+            if org_was_created:
+                existing_cfg = await db_client.get_user_configurations(user_model.id)
+                if not (existing_cfg.llm or existing_cfg.tts or existing_cfg.stt):
+                    default_cfg = build_clerk_default_configuration()
+                    if default_cfg:
+                        await db_client.update_user_configuration(
+                            user_model.id, default_cfg
+                        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to map user to organization: {exc}",
+        )
+
+    return user_model
 
 
 async def _handle_api_key_auth(api_key: str) -> UserModel:
