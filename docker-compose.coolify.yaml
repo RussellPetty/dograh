@@ -57,12 +57,12 @@ services:
       ENVIRONMENT: "oss"
       LOG_LEVEL: "INFO"
       AUTH_PROVIDER: "${AUTH_PROVIDER:-local}"
-      BACKEND_API_ENDPOINT: "$SERVICE_FQDN_NGINX"
+      BACKEND_API_ENDPOINT: "${PUBLIC_URL:-https://gouwmqjrniathk380impdpsj.2.24.112.83.sslip.io}"
       DATABASE_URL: "postgresql+asyncpg://postgres:postgres@postgres:5432/postgres"
       REDIS_URL: "redis://:redissecret@redis:6379"
       ENABLE_AWS_S3: "false"
       MINIO_ENDPOINT: "minio:9000"
-      MINIO_PUBLIC_ENDPOINT: "$SERVICE_FQDN_NGINX"
+      MINIO_PUBLIC_ENDPOINT: "${PUBLIC_URL:-https://gouwmqjrniathk380impdpsj.2.24.112.83.sslip.io}"
       MINIO_ACCESS_KEY: "minioadmin"
       MINIO_SECRET_KEY: "minioadmin"
       MINIO_BUCKET: "voice-audio"
@@ -118,8 +118,9 @@ services:
       context: .
       dockerfile: deploy/nginx.Dockerfile
     environment:
-      # Coolify generates an HTTPS domain and routes it to this service on :80.
-      SERVICE_FQDN_NGINX_80: ""
+      # Public HTTPS origin Coolify/traefik routes to this nginx on :80.
+      # Override via the PUBLIC_URL env var (e.g. https://voice.viato.ai).
+      SERVICE_FQDN_NGINX_80: "${PUBLIC_URL:-https://gouwmqjrniathk380impdpsj.2.24.112.83.sslip.io}"
     depends_on:
       - ui
       - api
