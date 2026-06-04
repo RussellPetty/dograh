@@ -125,8 +125,17 @@ services:
       - ui
       - api
       - minio
+    # Join Coolify's proxy network so traefik can route the public domain here.
+    networks:
+      - default
+      - coolify
 
 volumes:
   postgres_data:
   redis_data:
   minio_data:
+
+networks:
+  default:
+  coolify:
+    external: true
