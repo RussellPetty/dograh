@@ -276,11 +276,20 @@ async def _handle_clerk_auth(authorization: str | None) -> UserModel:
             status_code=500, detail=f"Error while creating user from database {e}"
         )
 
-    # Sync email from the token when present.
+    # Sync email from the token when present. Best-effort: another user may
+    # already hold this email (unique index ix_users_email_lower), and a collision
+    # must NOT break login. update_user_email uses its own session, so a failure
+    # there is self-contained and safe to swallow here.
     email = claims.get("email")
     if email and user_model.email != email:
-        await db_client.update_user_email(user_model.id, email)
-        user_model.email = email
+        try:
+            await db_client.update_user_email(user_model.id, email)
+            user_model.email = email
+        except Exception as e:
+            logger.warning(
+                f"Clerk auth: skipping email sync for user {user_model.id} "
+                f"(email '{email}' likely already in use): {e}"
+            )
 
     if user_was_created:
         capture_event(
