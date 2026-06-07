@@ -58,6 +58,11 @@ class InitiateCallRequest(BaseModel):
     # Optional caller-ID phone number to dial out from. Must belong to the
     # resolved telephony configuration; otherwise the provider picks one.
     from_phone_number_id: int | None = None
+    # Optional per-call context variables (e.g. reason, goals, first_name) that
+    # the agent's node prompts can reference as {{reason}} / {{goals}}. Merged
+    # into the run's initial_context so the prompt renderer picks them up.
+    # Backward compatible: omit it and behavior is unchanged.
+    context_variables: dict[str, str] | None = None
 
 
 def _get_execution_user_id(workflow) -> int:
@@ -149,6 +154,10 @@ async def initiate_call(
         # Merge template context variables (e.g. caller_number, called_number
         # set in workflow settings for testing pre-call data fetch).
         template_vars = workflow.template_context_variables or {}
+        # Optional per-call context variables override the workflow's template
+        # defaults. Placed at the top level of initial_context so node prompts
+        # can reference them as {{key}} via the template renderer.
+        per_call_vars = request.context_variables or {}
 
         numeric_suffix = int(str(uuid.uuid4()).replace("-", "")[:8], 16) % 100000000
         workflow_run_name = f"WR-TEL-OUT-{numeric_suffix:08d}"
@@ -160,6 +169,7 @@ async def initiate_call(
             call_type=CallType.OUTBOUND,
             initial_context={
                 **template_vars,
+                **per_call_vars,
                 "phone_number": phone_number,
                 "called_number": phone_number,
                 "provider": provider.PROVIDER_NAME,

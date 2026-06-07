@@ -1,3 +1,4 @@
+import hmac
 from typing import Annotated, Optional
 
 import httpx
@@ -5,7 +6,12 @@ from fastapi import Header, HTTPException, Query, WebSocket
 from loguru import logger
 from pydantic import ValidationError
 
-from api.constants import AUTH_PROVIDER, DOGRAH_MPS_SECRET_KEY, MPS_API_URL
+from api.constants import (
+    AUTH_PROVIDER,
+    DOGRAH_INTERNAL_API_SECRET,
+    DOGRAH_MPS_SECRET_KEY,
+    MPS_API_URL,
+)
 from api.db import db_client
 from api.db.models import UserModel
 from api.enums import PostHogEvent
@@ -21,12 +27,44 @@ from api.utils.auth import decode_jwt_token
 async def get_user(
     authorization: Annotated[str | None, Header()] = None,
     x_api_key: Annotated[str | None, Header(alias="X-API-Key")] = None,
+    x_dograh_clerk_user_id: Annotated[
+        str | None, Header(alias="X-Dograh-Clerk-User-Id")
+    ] = None,
+    x_dograh_clerk_org_id: Annotated[
+        str | None, Header(alias="X-Dograh-Clerk-Org-Id")
+    ] = None,
 ) -> UserModel:
     # ------------------------------------------------------------------
     # Check if API key is provided (takes precedence)
     # ------------------------------------------------------------------
     if x_api_key:
         return await _handle_api_key_auth(x_api_key)
+
+    # ------------------------------------------------------------------
+    # Internal service auth (server-to-server, on behalf of a user).
+    #
+    # The Viato CRM backend calls us with no live Clerk session: it proves
+    # itself with a shared secret in the Authorization header and names the
+    # Clerk user/org to act as via X-Dograh-Clerk-* headers. A normal Clerk
+    # user JWT never carries X-Dograh-Clerk-User-Id, so this branch only ever
+    # activates for genuine internal calls.
+    # ------------------------------------------------------------------
+    if x_dograh_clerk_user_id:
+        expected = DOGRAH_INTERNAL_API_SECRET or ""
+        presented = (
+            authorization[len("Bearer ") :]
+            if authorization and authorization.startswith("Bearer ")
+            else ""
+        )
+        # Require a configured, non-empty secret AND a matching presented token.
+        # An unset/empty DOGRAH_INTERNAL_API_SECRET must reject (no bypass).
+        if not expected or not hmac.compare_digest(presented, expected):
+            raise HTTPException(
+                status_code=401, detail="Invalid internal service credentials"
+            )
+        return await _handle_internal_service_auth(
+            x_dograh_clerk_user_id, x_dograh_clerk_org_id
+        )
 
     # ------------------------------------------------------------------
     # Check if we're using local (email/password) auth
@@ -167,6 +205,53 @@ async def _handle_oss_auth(authorization: str | None) -> UserModel:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 
+async def _map_clerk_identity_to_org(
+    user_model: UserModel, org_provider_id: str
+) -> None:
+    """Resolve + attach the Dograh organization for a Clerk-derived identity.
+
+    Shared by both Clerk-session auth (``_handle_clerk_auth``) and internal
+    server-to-server auth (``_handle_internal_service_auth``). Both paths must
+    converge on the SAME ``org_provider_id`` (the iframe and the agent acting on
+    behalf of the same user/org), so the organization mapping is identical.
+
+    Mutates ``user_model.selected_organization_id`` in place. Seeds default model
+    config (Viato-supplied OpenRouter/Deepgram/ElevenLabs keys) only when the org
+    is freshly created and has no existing llm/tts/stt config, so we never clobber
+    an existing configuration. Raises HTTP 500 on failure.
+    """
+    try:
+        (
+            organization,
+            org_was_created,
+        ) = await db_client.get_or_create_organization_by_provider_id(
+            org_provider_id=org_provider_id, user_id=user_model.id
+        )
+
+        if user_model.selected_organization_id != organization.id:
+            await db_client.add_user_to_organization(user_model.id, organization.id)
+            await db_client.update_user_selected_organization(
+                user_model.id, organization.id
+            )
+            user_model.selected_organization_id = organization.id
+
+            if org_was_created:
+                existing_cfg = await db_client.get_user_configurations(user_model.id)
+                if not (existing_cfg.llm or existing_cfg.tts or existing_cfg.stt):
+                    default_cfg = build_clerk_default_configuration()
+                    if default_cfg:
+                        await db_client.update_user_configuration(
+                            user_model.id, default_cfg
+                        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to map user to organization: {exc}",
+        )
+
+
 async def _handle_clerk_auth(authorization: str | None) -> UserModel:
     """Authenticate via a Clerk session JWT (embedded "Viato Voice" mode).
 
@@ -207,41 +292,47 @@ async def _handle_clerk_auth(authorization: str | None) -> UserModel:
     # Resolve the organization: prefer the Clerk org (shared workspace), else
     # fall back to a per-user org so single-user setups still work.
     org_provider_id = extract_org_provider_id(claims) or f"org_{clerk_user_id}"
+    await _map_clerk_identity_to_org(user_model, org_provider_id)
 
+    return user_model
+
+
+async def _handle_internal_service_auth(
+    clerk_user_id: str, clerk_org_id: str | None
+) -> UserModel:
+    """Authenticate an internal server-to-server call acting on behalf of a user.
+
+    Used by the Viato CRM backend, which has no live Clerk session: it has
+    already proven itself with the shared secret in ``get_user`` and names the
+    Clerk user/org to impersonate via the ``X-Dograh-Clerk-*`` headers. This
+    mirrors ``_handle_clerk_auth`` but SKIPS JWT verification and email sync
+    (the header path carries no JWT and no email).
+
+    The ``org_<sub>`` fallback below MUST match ``_handle_clerk_auth``'s
+    ``extract_org_provider_id(claims) or f"org_{clerk_user_id}"`` so the agent
+    and the iframe converge on the same Dograh organization for a given user.
+    """
     try:
         (
-            organization,
-            org_was_created,
-        ) = await db_client.get_or_create_organization_by_provider_id(
-            org_provider_id=org_provider_id, user_id=user_model.id
-        )
-
-        if user_model.selected_organization_id != organization.id:
-            await db_client.add_user_to_organization(user_model.id, organization.id)
-            await db_client.update_user_selected_organization(
-                user_model.id, organization.id
-            )
-            user_model.selected_organization_id = organization.id
-
-            # Seed default model config only when the org was just created, so we
-            # never clobber an existing configuration. In clerk mode we use
-            # Viato-supplied keys (OpenRouter LLM / Deepgram STT / ElevenLabs TTS)
-            # rather than the Dograh MPS service keys.
-            if org_was_created:
-                existing_cfg = await db_client.get_user_configurations(user_model.id)
-                if not (existing_cfg.llm or existing_cfg.tts or existing_cfg.stt):
-                    default_cfg = build_clerk_default_configuration()
-                    if default_cfg:
-                        await db_client.update_user_configuration(
-                            user_model.id, default_cfg
-                        )
-    except HTTPException:
-        raise
-    except Exception as exc:
+            user_model,
+            user_was_created,
+        ) = await db_client.get_or_create_user_by_provider_id(str(clerk_user_id))
+    except Exception as e:
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to map user to organization: {exc}",
+            status_code=500, detail=f"Error while creating user from database {e}"
         )
+
+    if user_was_created:
+        capture_event(
+            distinct_id=str(clerk_user_id),
+            event=PostHogEvent.SIGNED_UP,
+            properties={"auth_provider": "internal_service"},
+        )
+
+    # Same resolution as the clerk path: prefer the supplied org, else fall back
+    # to a per-user org. Keep this expression identical to _handle_clerk_auth.
+    org_provider_id = (clerk_org_id or "").strip() or f"org_{clerk_user_id}"
+    await _map_clerk_identity_to_org(user_model, org_provider_id)
 
     return user_model
 
