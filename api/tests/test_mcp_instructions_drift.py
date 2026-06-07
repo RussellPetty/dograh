@@ -24,8 +24,7 @@ import pytest
 
 from api.mcp_server import instructions as instructions_module
 from api.mcp_server.server import mcp
-from api.mcp_server.tools import create_workflow as create_workflow_module
-from api.mcp_server.tools import save_workflow as save_workflow_module
+from api.services.workflow import authoring as authoring_module
 
 # Every registered MCP tool name starts with one of these verbs. A
 # backticked snake_case token in the guide whose leading word is a verb is
@@ -56,10 +55,18 @@ _TOOL_VERB_PREFIXES = frozenset(
 # `new Workflow` whose first char after the backtick isn't `[a-z_]`.
 _BACKTICKED_SNAKE_RE = re.compile(r"`([a-z][a-z0-9]*(?:_[a-z0-9]+)+)")
 
-# Error codes are emitted as the first string arg to `_error_result(...)`.
-_ERROR_RESULT_LITERAL_RE = re.compile(r'_error_result\(\s*"([a-z_]+)"')
-# `parse_error` / `validation_error` are picked by a `code_key` ternary
-# rather than passed as a literal to `_error_result`, so match them too.
+# The create/save error envelopes now live in the authoring SERVICE
+# (`api/services/workflow/authoring.py`); the MCP tools are thin wrappers
+# that delegate to it. Each tool gets its OWN envelope helper, so we match
+# per-tool: `create_workflow` → `_create_error(...)`, `save_workflow` →
+# `_save_error(...)`. (Matching both would wrongly require save's docstring
+# to document create-only codes like `missing_name`.) `parse_error` /
+# `validation_error` are picked by a `code_key` ternary rather than passed
+# as a literal to the envelope helper, so they're matched separately.
+_ERROR_HELPER_RE = {
+    "create_workflow": re.compile(r'_create_error\(\s*"([a-z_]+)"'),
+    "save_workflow": re.compile(r'_save_error\(\s*"([a-z_]+)"'),
+}
 _CODE_KEY_LITERAL_RE = re.compile(r'"(parse_error|validation_error)"')
 
 
@@ -71,11 +78,10 @@ def _referenced_tool_names(text: str) -> set[str]:
     }
 
 
-def _returned_error_codes(module) -> set[str]:
+def _returned_error_codes(tool_name: str, module) -> set[str]:
     source = Path(module.__file__).read_text(encoding="utf-8")
-    return set(_ERROR_RESULT_LITERAL_RE.findall(source)) | set(
-        _CODE_KEY_LITERAL_RE.findall(source)
-    )
+    helper_re = _ERROR_HELPER_RE[tool_name]
+    return set(helper_re.findall(source)) | set(_CODE_KEY_LITERAL_RE.findall(source))
 
 
 @pytest.mark.asyncio
@@ -96,8 +102,11 @@ async def test_guide_only_references_registered_tools():
 @pytest.mark.parametrize(
     "tool_name, module",
     [
-        ("save_workflow", save_workflow_module),
-        ("create_workflow", create_workflow_module),
+        # The MCP tools delegate to the authoring service, which owns the
+        # error envelopes — so the returned error codes are read from there
+        # while the description still comes from the live `tools/list` output.
+        ("save_workflow", authoring_module),
+        ("create_workflow", authoring_module),
     ],
 )
 async def test_tool_documents_every_error_code_it_returns(tool_name, module):
@@ -105,7 +114,7 @@ async def test_tool_documents_every_error_code_it_returns(tool_name, module):
         tool.name: tool.description or "" for tool in await mcp.list_tools()
     }
     description = descriptions[tool_name]
-    returned = _returned_error_codes(module)
+    returned = _returned_error_codes(tool_name, module)
 
     assert returned, f"no error codes detected in {tool_name} source — regex broke"
     undocumented = sorted(code for code in returned if code not in description)

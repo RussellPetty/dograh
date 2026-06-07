@@ -35,6 +35,14 @@ from api.services.posthog_client import capture_event
 from api.services.pricing.run_usage_response import format_public_usage_info
 from api.services.reports import generate_workflow_report_csv
 from api.services.storage import storage_fs
+from api.services.workflow.authoring import (
+    build_voice_prompting_guide,
+    create_workflow_from_sdk,
+    get_node_type_catalog,
+    get_workflow_sdk_code,
+    list_node_types_catalog,
+    save_workflow_draft_from_sdk,
+)
 from api.services.workflow.dto import ReactFlowDTO, sanitize_workflow_definition
 from api.services.workflow.duplicate import duplicate_workflow
 from api.services.workflow.errors import ItemKind, WorkflowError
@@ -50,6 +58,88 @@ from api.services.workflow.workflow_graph import WorkflowGraph
 from api.utils.artifacts import artifact_url
 
 router = APIRouter(prefix="/workflow")
+
+
+# ---------------------------------------------------------------------------
+# SDK-TypeScript authoring (deep multi-node authoring over REST)
+# ---------------------------------------------------------------------------
+#
+# These routes expose the same local TS-SDK authoring the MCP tools use
+# (`api/services/workflow/authoring.py`) — parse `@dograh/sdk` TypeScript via
+# the Node ts_validator, validate (DTO + graph + trigger paths), and persist.
+# No external MPS service is involved; authoring DOES require Node at runtime
+# (the same requirement as the existing MCP authoring feature). Handlers stay
+# thin: resolve the user (org-scoped via Depends(get_user)) and delegate.
+#
+# Registered BEFORE the `/{workflow_id}/...` routes so the static
+# `/authoring/...` paths and `/{workflow_id}/code` resolve unambiguously.
+
+
+class AuthoringCreateRequest(BaseModel):
+    """`@dograh/sdk` TypeScript source for a brand-new workflow."""
+
+    code: str
+
+
+class AuthoringSaveRequest(BaseModel):
+    """`@dograh/sdk` TypeScript source to save as a new draft of a workflow."""
+
+    code: str
+
+
+@router.post("/authoring/create")
+async def authoring_create_workflow(
+    request: AuthoringCreateRequest,
+    user: UserModel = Depends(get_user),
+) -> dict:
+    """Author a NEW workflow from `@dograh/sdk` TypeScript (published as v1).
+
+    Returns the same structured dict as the MCP `create_workflow` tool: on
+    success a workflow summary; on failure `created: false` plus a
+    machine-readable `error_code`, a human-readable `error`, and (when the
+    validator located them) per-location `errors` the caller can fix and
+    resubmit.
+    """
+    return await create_workflow_from_sdk(request.code, user)
+
+
+@router.get("/authoring/node-types")
+async def authoring_list_node_types(
+    user: UserModel = Depends(get_user),
+) -> dict:
+    """List every node type with a brief summary, plus `spec_version`.
+
+    Discovery endpoint for the authoring flow — call before composing TS so
+    you know which node types exist; then GET `/authoring/node-types/{name}`
+    for the full field schema of any you intend to use.
+    """
+    return list_node_types_catalog()
+
+
+@router.get("/authoring/node-types/{name}")
+async def authoring_get_node_type(
+    name: str,
+    user: UserModel = Depends(get_user),
+) -> dict:
+    """Full authoring schema for one node type (fields, types, examples)."""
+    return get_node_type_catalog(name)
+
+
+@router.get("/authoring/guide")
+async def authoring_voice_prompting_guide(
+    user: UserModel = Depends(get_user),
+    stage: Optional[str] = Query(
+        None, description="'plan' | 'create' | 'review' — returns a stage briefing."
+    ),
+    topic: Optional[str] = Query(
+        None, description="A topic id from a prior briefing — returns full content."
+    ),
+    node_type: Optional[str] = Query(
+        None, description="Optional node-type filter (most useful with stage='create')."
+    ),
+) -> dict:
+    """Voice-prompting craft guidance for authoring workflow prompts."""
+    return build_voice_prompting_guide(stage=stage, topic=topic, node_type=node_type)
 
 
 class ValidateWorkflowResponse(BaseModel):
@@ -321,6 +411,36 @@ async def validate_workflow(
         raise _validation_errors_http_exception(errors)
 
     return ValidateWorkflowResponse(is_valid=True, errors=[])
+
+
+@router.get("/{workflow_id}/code")
+async def get_workflow_authoring_code(
+    workflow_id: int,
+    user: UserModel = Depends(get_user),
+) -> dict:
+    """Return a workflow as editable `@dograh/sdk` TypeScript source.
+
+    Mirrors the MCP `get_workflow_code` projection: selects the working copy
+    (latest draft → latest published → legacy definition) and emits TS the
+    caller can edit and pass back to `/{workflow_id}/authoring/save`.
+    """
+    return await get_workflow_sdk_code(workflow_id, user)
+
+
+@router.post("/{workflow_id}/authoring/save")
+async def save_workflow_authoring_draft(
+    workflow_id: int,
+    request: AuthoringSaveRequest,
+    user: UserModel = Depends(get_user),
+) -> dict:
+    """Save edited `@dograh/sdk` TypeScript as a new DRAFT of a workflow.
+
+    The published version stays intact (publish separately via
+    `POST /{workflow_id}/publish`). Returns the same structured dict as the
+    MCP `save_workflow` tool: on success a draft summary; on failure
+    `saved: false` plus `error_code`/`error`/`errors`.
+    """
+    return await save_workflow_draft_from_sdk(workflow_id, request.code, user)
 
 
 def _transform_schema_errors(

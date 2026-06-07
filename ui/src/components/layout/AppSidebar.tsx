@@ -264,7 +264,7 @@ export function AppSidebar() {
               className="notranslate flex items-center gap-2 px-2 text-xl font-bold"
               translate="no"
             >
-              Dograh
+              Viato Voice
               {versionInfo && (
                 <span
                   className="notranslate text-xs font-normal text-muted-foreground"

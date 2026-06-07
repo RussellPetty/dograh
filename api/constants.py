@@ -32,6 +32,11 @@ CORS_ALLOWED_ORIGINS = [
 AUTH_PROVIDER = os.getenv("AUTH_PROVIDER", "local")
 DOGRAH_MPS_SECRET_KEY = os.getenv("DOGRAH_MPS_SECRET_KEY", None)
 MPS_API_URL = os.getenv("MPS_API_URL", "https://services.dograh.com")
+# Shared secret for internal server-to-server calls (e.g. the Viato CRM backend
+# acting on behalf of a user with no live Clerk session). Must match the value
+# configured on the caller; when unset, the internal-service auth path is
+# refused entirely (no empty-secret bypass).
+DOGRAH_INTERNAL_API_SECRET = os.getenv("DOGRAH_INTERNAL_API_SECRET", "")
 
 # Storage Configuration
 ENABLE_AWS_S3 = os.getenv("ENABLE_AWS_S3", "false").lower() == "true"

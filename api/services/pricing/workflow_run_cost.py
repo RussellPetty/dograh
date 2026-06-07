@@ -210,6 +210,17 @@ async def calculate_workflow_run_cost(workflow_run_id: int):
 
         await save_workflow_run_cost_info(workflow_run_id, cost_info)
 
+        # Bill the call against the Viato CRM token system (embedded mode).
+        # No-op unless VIATO_BILLING_ENABLED; best-effort (CRM dedupes by run id).
+        try:
+            from api.services.billing.viato_billing import maybe_report_viato_usage
+
+            await maybe_report_viato_usage(workflow_run, cost_info)
+        except Exception as e:
+            logger.error(
+                f"Viato usage report failed for run {workflow_run_id}: {e}"
+            )
+
         try:
             await apply_workflow_run_usage_to_organization(workflow_run, cost_info)
         except Exception as e:

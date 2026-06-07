@@ -57,6 +57,11 @@ def authed_user() -> MagicMock:
 
 @pytest.fixture
 def mock_backends(authed_user: MagicMock):
+    # `authenticate_mcp_request` stays on the thin MCP wrapper; the authoring
+    # logic (db_client, parse_code, reconcile_positions) now lives in the
+    # service, so those are patched there. db_client is a shared singleton, so
+    # patching its attributes via the service module path affects every caller
+    # (including the projection helper used to fetch the previous draft).
     save_mock = AsyncMock(return_value=_FakeDraft())
     update_mock = AsyncMock(return_value=_FakeWorkflowModel())
     with (
@@ -65,19 +70,19 @@ def mock_backends(authed_user: MagicMock):
             AsyncMock(return_value=authed_user),
         ),
         patch(
-            "api.mcp_server.tools.save_workflow.db_client.get_workflow",
+            "api.services.workflow.authoring.db_client.get_workflow",
             AsyncMock(return_value=_FakeWorkflowModel()),
         ),
         patch(
-            "api.mcp_server.tools.save_workflow.db_client.save_workflow_draft",
+            "api.services.workflow.authoring.db_client.save_workflow_draft",
             save_mock,
         ),
         patch(
-            "api.mcp_server.tools.save_workflow.db_client.update_workflow",
+            "api.services.workflow.authoring.db_client.update_workflow",
             update_mock,
         ),
         patch(
-            "api.mcp_server.tools.save_workflow.db_client.get_draft_version",
+            "api.services.workflow.authoring.db_client.get_draft_version",
             AsyncMock(return_value=None),
         ),
     ):
@@ -201,8 +206,11 @@ async def test_invalid_trigger_path_surfaces_validation_error(mock_backends):
     }
 
     with (
+        # parse_code is imported lazily inside the service fn (to keep
+        # services/ free of an mcp_server import cycle), so patch it at its
+        # definition site rather than as an authoring-module attribute.
         patch(
-            "api.mcp_server.tools.save_workflow.parse_code",
+            "api.mcp_server.ts_bridge.parse_code",
             AsyncMock(
                 return_value={
                     "ok": True,
@@ -212,7 +220,7 @@ async def test_invalid_trigger_path_surfaces_validation_error(mock_backends):
             ),
         ),
         patch(
-            "api.mcp_server.tools.save_workflow.reconcile_positions",
+            "api.services.workflow.authoring.reconcile_positions",
             return_value=payload,
         ),
     ):
@@ -255,7 +263,7 @@ async def test_unknown_workflow_raises_404(authed_user: MagicMock):
             AsyncMock(return_value=authed_user),
         ),
         patch(
-            "api.mcp_server.tools.save_workflow.db_client.get_workflow",
+            "api.services.workflow.authoring.db_client.get_workflow",
             AsyncMock(return_value=None),
         ),
     ):
