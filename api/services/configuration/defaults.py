@@ -42,15 +42,15 @@ def build_clerk_default_configuration() -> Optional[UserConfiguration]:
     Seeds providers from Viato-supplied keys in the environment instead of the
     Dograh MPS service:
 
-      - LLM: OpenRouter   (``OPENROUTER_API_KEY``; model from ``VIATO_VOICE_LLM_MODEL``)
-      - STT: Deepgram      (``DEEPGRAM_API_KEY``)
-      - TTS: ElevenLabs    (``ELEVENLABS_API_KEY``)
+      - Voice: Grok Realtime (xAI) (``XAI_API_KEY``) — self-contained STT+LLM+TTS,
+        set as ``realtime`` with ``is_realtime=True`` (default when the key is set)
+      - LLM: OpenRouter   (``OPENROUTER_API_KEY``; model from ``VIATO_VOICE_LLM_MODEL``) — text/non-realtime paths
+      - STT: Deepgram      (``DEEPGRAM_API_KEY``) — non-realtime paths
 
-    OpenRouter only powers the LLM leg — STT and TTS are separate providers that
-    need their own keys. Each leg is included only when its key is present, and
-    the function returns ``None`` when no keys are set (so the user configures
-    providers in the UI instead). Non-key fields fall back to each provider
-    configuration's own defaults.
+    Each leg is included only when its key is present, and the function returns
+    ``None`` when no keys are set (so the user configures providers in the UI
+    instead). Non-key fields fall back to each provider configuration's own
+    defaults.
     """
     config: dict = {}
 
@@ -69,12 +69,30 @@ def build_clerk_default_configuration() -> Optional[UserConfiguration]:
             "api_key": [deepgram_key],
         }
 
-    elevenlabs_key = os.getenv("ELEVENLABS_API_KEY")
-    if elevenlabs_key:
-        config["tts"] = {
-            "provider": ServiceProviders.ELEVENLABS.value,
-            "api_key": [elevenlabs_key],
+    # Voice: Grok Realtime (xAI) — a self-contained realtime model that does
+    # STT + LLM + TTS in one turn. When ``XAI_API_KEY`` is present we make it the
+    # default voice (``is_realtime=True``); the OpenRouter llm / Deepgram stt above
+    # remain for non-realtime/text paths. Voices: Ara/Rex/Sal/Eve/Leo.
+    xai_key = os.getenv("XAI_API_KEY")
+    if xai_key:
+        config["realtime"] = {
+            "provider": ServiceProviders.GROK_REALTIME.value,
+            "api_key": [xai_key],
+            "model": os.getenv(
+                "VIATO_VOICE_REALTIME_MODEL", "grok-voice-think-fast-1.0"
+            ),
+            "voice": os.getenv("VIATO_VOICE_GROK_VOICE", "Ara"),
         }
+        config["is_realtime"] = True
+    else:
+        # Fallback voice when no realtime key is configured (left for self-hosters
+        # who supply an ElevenLabs key instead).
+        elevenlabs_key = os.getenv("ELEVENLABS_API_KEY")
+        if elevenlabs_key:
+            config["tts"] = {
+                "provider": ServiceProviders.ELEVENLABS.value,
+                "api_key": [elevenlabs_key],
+            }
 
     if not config:
         return None
