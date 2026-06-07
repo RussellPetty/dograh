@@ -107,8 +107,11 @@ services:
       BACKEND_URL: "http://api:8000"
       NODE_ENV: "oss"
       ENABLE_TELEMETRY: "false"
-      EMBED_FRAME_ANCESTORS: "${EMBED_FRAME_ANCESTORS:-'self' https://viato.ai https://*.viato.ai}"
-      EMBED_MIC_ALLOWLIST: "${EMBED_MIC_ALLOWLIST:-self \"https://viato.ai\" \"https://app.viato.ai\"}"
+      # Space-separated ORIGINS only (no quotes / no 'self') — next.config.ts adds
+      # 'self' + the Permissions-Policy quotes. Quote-free env avoids stores like
+      # Coolify mangling quotes into the served CSP/Permissions-Policy headers.
+      EMBED_FRAME_ANCESTORS: "${EMBED_FRAME_ANCESTORS:-https://viato.ai https://*.viato.ai}"
+      EMBED_MIC_ALLOWLIST: "${EMBED_MIC_ALLOWLIST:-https://viato.ai https://app.viato.ai}"
     depends_on:
       api:
         condition: service_healthy
