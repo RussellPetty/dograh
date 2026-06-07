@@ -3,6 +3,7 @@ import { Suspense } from 'react';
 import { getWorkflowsApiV1WorkflowFetchGet, listFoldersApiV1FolderGet } from '@/client/sdk.gen';
 import type { FolderResponse, WorkflowListResponse } from '@/client/types.gen';
 import { CreateWorkflowButton } from "@/components/workflow/CreateWorkflowButton";
+import EmbeddedWorkflowList from '@/components/workflow/EmbeddedWorkflowList';
 import { AgentFolderView } from '@/components/workflow/folders/AgentFolderView';
 import { CreateFolderButton } from '@/components/workflow/folders/CreateFolderButton';
 import { FolderSection } from '@/components/workflow/folders/FolderSection';
@@ -149,7 +150,20 @@ function WorkflowsLoading() {
     );
 }
 
-export default function WorkflowPage() {
+export default async function WorkflowPage() {
+    const authProvider = await getServerAuthProvider();
+
+    // Embedded "Viato Voice" deployment: render the list client-side so it auths
+    // via the postMessage bridge (server cookies are empty for the embed). The
+    // non-clerk (local/stack) path below is unchanged.
+    if (authProvider === 'clerk') {
+        return (
+            <WorkflowLayout showFeaturesNav={true}>
+                <EmbeddedWorkflowList />
+            </WorkflowLayout>
+        );
+    }
+
     return (
         <WorkflowLayout showFeaturesNav={true}>
             <Suspense fallback={<WorkflowsLoading />}>

@@ -2,6 +2,7 @@ import { isNextRouterError } from "next/dist/client/components/is-next-router-er
 import { redirect } from "next/navigation";
 
 import { getWorkflowCountApiV1WorkflowCountGet } from "@/client/sdk.gen";
+import ClerkEmbedRedirect from "@/components/auth/ClerkEmbedRedirect";
 import SignInClient from "@/components/SignInClient";
 import { getServerAccessToken,getServerAuthProvider,getServerUser } from "@/lib/auth/server";
 import logger from '@/lib/logger';
@@ -13,6 +14,13 @@ export default async function Home() {
   logger.debug('[HomePage] Starting Home page render');
   const authProvider = await getServerAuthProvider();
   logger.debug('[HomePage] Auth provider:', authProvider);
+
+  // Embedded "Viato Voice" deployment: the embed authenticates client-side via the
+  // postMessage bridge, so server cookies are empty here. Redirect client-side to
+  // /workflow (which renders client-side under clerk) instead of the sign-in page.
+  if (authProvider === 'clerk') {
+    return <ClerkEmbedRedirect />;
+  }
 
   // For local/OSS provider, check if user has workflows
   if (authProvider === 'local') {
