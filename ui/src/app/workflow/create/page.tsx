@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { createWorkflowFromTemplateApiV1WorkflowCreateTemplatePost } from '@/client/sdk.gen';
 import { Button } from '@/components/ui/button';
@@ -23,7 +23,7 @@ import logger from '@/lib/logger';
 
 export default function CreateWorkflowPage() {
     const router = useRouter();
-    const { user, getAccessToken } = useAuth();
+    const { user, getAccessToken, provider } = useAuth();
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [showSuccessModal, setShowSuccessModal] = useState(false);
@@ -32,6 +32,12 @@ export default function CreateWorkflowPage() {
     const [callType, setCallType] = useState<'inbound' | 'outbound'>('inbound');
     const [useCase, setUseCase] = useState('');
     const [activityDescription, setActivityDescription] = useState('');
+
+    // The MPS-backed Agent Builder isn't available in the embedded "Viato Voice"
+    // (clerk) deployment — redirect users back to the agents list.
+    useEffect(() => {
+        if (provider === 'clerk') router.replace('/workflow');
+    }, [provider, router]);
 
     const handleCreateWorkflow = async () => {
         if (!useCase || !activityDescription) {
@@ -78,6 +84,8 @@ export default function CreateWorkflowPage() {
         if (!workflowId) return;
         router.push(`/workflow/${workflowId}?onboarding=web_call`);
     };
+
+    if (provider === 'clerk') return null;
 
     return (
         <div className="min-h-screen bg-background">

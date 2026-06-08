@@ -13,6 +13,7 @@ import {
     DropdownMenuItem,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { detailFromError } from '@/lib/apiError';
 import { useAuth } from '@/lib/auth';
 import logger from '@/lib/logger';
 import { getRandomId } from '@/lib/utils';
@@ -46,7 +47,7 @@ const BLANK_WORKFLOW_DEFINITION = {
 
 export function CreateWorkflowButton() {
     const router = useRouter();
-    const { user, getAccessToken } = useAuth();
+    const { user, getAccessToken, provider } = useAuth();
     const [isCreating, setIsCreating] = useState(false);
 
     const handleAgentBuilder = () => {
@@ -70,16 +71,32 @@ export function CreateWorkflowButton() {
                 },
             });
 
+            if (response.error) {
+                toast.error(detailFromError(response.error, 'Failed to create agent'));
+                return;
+            }
             if (response.data?.id) {
                 router.push(`/workflow/${response.data.id}`);
             }
         } catch (err) {
             logger.error(`Error creating blank workflow: ${err}`);
-            toast.error('Failed to create workflow');
+            toast.error('Failed to create agent');
         } finally {
             setIsCreating(false);
         }
     };
+
+    // The embedded "Viato Voice" (clerk) deployment doesn't use the MPS-backed
+    // Agent Builder (a hosted dograh service that needs a per-user service key) —
+    // create a blank agent locally and open the editor instead.
+    if (provider === 'clerk') {
+        return (
+            <Button onClick={handleBlankCanvas} disabled={isCreating || !user}>
+                <PlusIcon className="w-4 h-4" />
+                {isCreating ? 'Creating...' : 'Create Agent'}
+            </Button>
+        );
+    }
 
     return (
         <DropdownMenu>
