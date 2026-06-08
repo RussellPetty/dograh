@@ -221,6 +221,30 @@ class PipecatEngine:
 
         return render_template(prompt, self._call_context_vars)
 
+    def _call_objective_prompt(self) -> "str | None":
+        """Build a per-call objective block from reason/goals in the call context.
+
+        Outbound calls (the Viato AI Voice Call node, campaigns) pass a ``reason``
+        and ``goals`` into the call context. Surface them to the agent so it
+        actually pursues the call's purpose, regardless of whether the agent's own
+        prompt references ``{{reason}}``/``{{goals}}``.
+        """
+        ctx = self._call_context_vars or {}
+        reason = str(ctx.get("reason") or "").strip()
+        goals = str(ctx.get("goals") or "").strip()
+        if not reason and not goals:
+            return None
+        lines = ["# Call objective (the purpose of THIS call)"]
+        if reason:
+            lines.append(f"Reason for the call: {reason}")
+        if goals:
+            lines.append(f"Goal(s) to accomplish: {goals}")
+        lines.append(
+            "Pursue this objective naturally and conversationally throughout the "
+            "call. Do not read it out verbatim."
+        )
+        return "\n".join(lines)
+
     async def _create_transition_func(
         self,
         name: str,
@@ -536,6 +560,7 @@ class PipecatEngine:
             workflow=self.workflow,
             format_prompt=self._format_prompt,
             has_recordings=self._has_recordings,
+            call_objective=self._call_objective_prompt(),
         )
         functions = await compose_functions_for_node(
             node=node,
