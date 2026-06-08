@@ -4,6 +4,7 @@ import posthog from "posthog-js";
 import { useEffect, useState } from "react";
 
 import { PostHogEvent } from "@/constants/posthog-events";
+import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
 interface GitHubStarBadgeProps {
@@ -14,6 +15,8 @@ interface GitHubStarBadgeProps {
 }
 
 export function GitHubStarBadge({ className, label, showCount, source }: GitHubStarBadgeProps) {
+  // OSS/community link — hidden in the embedded "Viato Voice" (clerk) deployment.
+  const { provider } = useAuth();
   const [starCount, setStarCount] = useState<string | null>(null);
 
   useEffect(() => {
@@ -28,6 +31,8 @@ export function GitHubStarBadge({ className, label, showCount, source }: GitHubS
       })
       .catch(() => {});
   }, [showCount]);
+
+  if (provider === "clerk") return null;
 
   const hasCount = showCount && starCount;
 

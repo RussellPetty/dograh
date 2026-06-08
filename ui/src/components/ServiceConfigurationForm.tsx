@@ -17,6 +17,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { VoiceSelector } from "@/components/VoiceSelector";
 import { LANGUAGE_DISPLAY_NAMES } from "@/constants/languages";
 import { useUserConfig } from "@/context/UserConfigContext";
+import { useAuth } from "@/lib/auth";
 import type { ModelOverrides } from "@/types/workflow-configurations";
 
 type ServiceSegment = "llm" | "tts" | "stt" | "embeddings" | "realtime";
@@ -122,6 +123,8 @@ export function ServiceConfigurationForm({
     const [isSaving, setIsSaving] = useState(false);
     const [isRealtime, setIsRealtime] = useState(false);
     const { userConfig } = useUserConfig();
+    // Embedded "Viato Voice" (clerk) forces platform-managed keys — never show key inputs.
+    const { provider: authProvider } = useAuth();
     const [schemas, setSchemas] = useState<Record<ServiceSegment, Record<string, ProviderSchema>>>({
         llm: {},
         tts: {},
@@ -550,7 +553,7 @@ export function ServiceConfigurationForm({
                     </div>
                 )}
 
-                {currentProvider && providerSchema && providerSchema.properties.api_key && (
+                {authProvider !== 'clerk' && currentProvider && providerSchema && providerSchema.properties.api_key && (
                     <div className="space-y-2">
                         <Label>{mode === 'override' ? 'API Key (leave empty to use global)' : 'API Key(s)'}</Label>
                         {renderFieldDescription("api_key", providerSchema)}

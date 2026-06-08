@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
 from pydantic import BaseModel, ValidationError
 
+from api.constants import AUTH_PROVIDER
 from api.db import db_client
 from api.db.models import (
     UserModel,
@@ -118,6 +119,15 @@ async def update_user_configurations(
 
     # Remove organization_pricing from incoming dict as it's read-only
     incoming_dict.pop("organization_pricing", None)
+
+    # On the hosted "Viato Voice" (clerk) deployment, provider API keys are
+    # managed by the platform — users must not be able to set or change them.
+    # Drop any incoming keys so the merge below preserves the seeded credentials.
+    if AUTH_PROVIDER == "clerk":
+        for _service in ("llm", "tts", "stt", "embeddings", "realtime"):
+            service_cfg = incoming_dict.get(_service)
+            if isinstance(service_cfg, dict):
+                service_cfg.pop("api_key", None)
 
     # Merge via helper
     try:

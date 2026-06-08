@@ -183,6 +183,16 @@ export function AppSidebar() {
 
   const isActive = (path: string) => pathname.startsWith(path);
 
+  // The embedded "Viato Voice" deployment manages provider/API keys itself —
+  // hide developer API-key management from its sidebar.
+  const navSections =
+    provider === "clerk"
+      ? NAV_SECTIONS.map((section) => ({
+          ...section,
+          items: section.items.filter((item) => item.url !== "/api-keys"),
+        }))
+      : NAV_SECTIONS;
+
   const handleMobileNavClick = () => {
     if (isMobile) {
       setOpenMobile(false);
@@ -334,7 +344,7 @@ export function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent className={cn("notranslate", isCollapsed && "px-0")} translate="no">
-        {NAV_SECTIONS.map((section, index) => (
+        {navSections.map((section, index) => (
           <SidebarGroup
             key={section.label ?? "overview"}
             className={index === 0 ? "mt-2" : "mt-6"}

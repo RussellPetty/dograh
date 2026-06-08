@@ -23,6 +23,7 @@ const PARENT_ORIGIN_KEY = 'viato_voice_parent_origin';
 const MSG_READY = 'viato-voice-ready';
 const MSG_TOKEN_REQUEST = 'viato-voice-token-request';
 const MSG_AUTH = 'viato-voice-auth';
+const MSG_THEME = 'viato-voice-theme';
 
 let _token: string | null = null;
 let _expEpochMs: number | null = null;
@@ -118,6 +119,18 @@ function setToken(token: string, expiresAtEpochSec?: number) {
   scheduleRefresh();
 }
 
+/** Apply the parent page's light/dark theme to the embedded app (Tailwind `dark` class). */
+function applyEmbedTheme(theme: 'dark' | 'light') {
+  if (typeof document === 'undefined') return;
+  try {
+    if (theme === 'dark') document.documentElement.classList.add('dark');
+    else document.documentElement.classList.remove('dark');
+    window.sessionStorage.setItem('viato_voice_theme', theme);
+  } catch {
+    /* sessionStorage/DOM may be unavailable */
+  }
+}
+
 /** Start listening for the parent's Clerk token. No-op when not embedded. */
 export function initEmbedBridge() {
   if (_initialized || typeof window === 'undefined') return;
@@ -128,10 +141,13 @@ export function initEmbedBridge() {
     const expected = parentOrigin();
     if (expected && event.origin !== expected) return; // origin allow-list
     if (event.source && event.source !== window.parent) return; // only the embedding parent
-    const data = event.data as { type?: string; token?: unknown; expiresAt?: unknown } | null;
+    const data = event.data as { type?: string; token?: unknown; expiresAt?: unknown; theme?: unknown } | null;
     if (!data || typeof data !== 'object') return;
     if (data.type === MSG_AUTH && typeof data.token === 'string') {
       setToken(data.token, typeof data.expiresAt === 'number' ? data.expiresAt : undefined);
+    }
+    if (data.type === MSG_THEME && (data.theme === 'dark' || data.theme === 'light')) {
+      applyEmbedTheme(data.theme);
     }
   });
 

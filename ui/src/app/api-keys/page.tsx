@@ -1,6 +1,7 @@
 "use client";
 
 import { Copy, Eye, EyeOff, Key, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 
 import {
@@ -25,7 +26,8 @@ import { useAuth } from '@/lib/auth';
 import logger from '@/lib/logger';
 
 export default function APIKeysPage() {
-    const { user, getAccessToken, redirectToLogin, loading } = useAuth();
+    const { user, getAccessToken, redirectToLogin, loading, provider } = useAuth();
+    const router = useRouter();
     const { config } = useAppConfig();
     const isOSS = config?.deploymentMode === 'oss';
 
@@ -58,6 +60,13 @@ export default function APIKeysPage() {
             redirectToLogin();
         }
     }, [loading, user, redirectToLogin]);
+
+    // Developer API-key management is hidden in the embedded "Viato Voice" (clerk) deployment.
+    useEffect(() => {
+        if (provider === 'clerk') {
+            router.replace('/workflow');
+        }
+    }, [provider, router]);
 
     const fetchApiKeys = useCallback(async () => {
         logger.debug('[APIKeysPage] fetchApiKeys called', {
@@ -317,6 +326,8 @@ export default function APIKeysPage() {
     const activeServiceKeys = serviceKeys.filter(key => !key.archived_at);
     const canCreateServiceKey = !isOSS || activeServiceKeys.length === 0;
     const showServiceKeyArchiveControls = !isOSS;
+
+    if (provider === 'clerk') return null;
 
     return (
         <div className="min-h-screen bg-background">

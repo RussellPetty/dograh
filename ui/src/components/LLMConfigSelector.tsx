@@ -13,6 +13,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
+import { useAuth } from "@/lib/auth";
 
 interface SchemaProperty {
     type?: string;
@@ -45,6 +46,7 @@ export function LLMConfigSelector({
     apiKey,
     onApiKeyChange,
 }: LLMConfigSelectorProps) {
+    const { provider: authProvider } = useAuth();
     const [schemas, setSchemas] = useState<Record<string, ProviderSchema>>({});
     const [isManualModelInput, setIsManualModelInput] = useState(false);
 
@@ -194,15 +196,17 @@ export function LLMConfigSelector({
                 </div>
             </div>
 
-            <div className="space-y-2">
-                <Label>API Key</Label>
-                <Input
-                    type="text"
-                    placeholder="Enter API key"
-                    value={apiKey}
-                    onChange={(e) => onApiKeyChange(e.target.value)}
-                />
-            </div>
+            {authProvider !== "clerk" && (
+                <div className="space-y-2">
+                    <Label>API Key</Label>
+                    <Input
+                        type="text"
+                        placeholder="Enter API key"
+                        value={apiKey}
+                        onChange={(e) => onApiKeyChange(e.target.value)}
+                    />
+                </div>
+            )}
         </div>
     );
 }
