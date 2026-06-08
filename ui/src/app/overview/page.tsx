@@ -25,7 +25,9 @@ export default function OverviewPage() {
                             )}
                         </CardTitle>
                         <CardDescription className="text-lg mt-2">
-                            {isOSSMode ? (
+                            {provider === 'clerk' ? (
+                                "Build, manage, and deploy your AI voice agents."
+                            ) : isOSSMode ? (
                                 <>
                                     Open source alternative to Vapi. Help us support the project by giving us a star on GitHub.
                                 </>
@@ -35,7 +37,7 @@ export default function OverviewPage() {
                         </CardDescription>
                     </CardHeader>
                     <CardContent>
-                        {isOSSMode && (
+                        {isOSSMode && provider !== 'clerk' && (
                             <div className="mb-6">
                                 <GitHubStarBadge label="Star us on GitHub" showCount source="overview_page" />
                             </div>
@@ -78,7 +80,8 @@ export default function OverviewPage() {
                     </Card>
                 </div>
 
-                {/* Resources Section */}
+                {/* Resources Section — hidden in the embedded "Viato Voice" (clerk) deployment */}
+                {provider !== 'clerk' && (
                 <Card className="mt-8">
                     <CardHeader>
                         <CardTitle>Resources</CardTitle>
@@ -109,6 +112,7 @@ export default function OverviewPage() {
                         </div>
                     </CardContent>
                 </Card>
+                )}
             </div>
         </div>
     );
