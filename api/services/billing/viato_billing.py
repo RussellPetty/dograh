@@ -117,6 +117,22 @@ async def fetch_twilio_credentials(user: UserModel) -> Optional[dict]:
     )
 
 
+async def fetch_crm_context(user: UserModel) -> Optional[dict]:
+    """Fetch the caller's CRM profile context (e.g. company) for greeting vars.
+
+    Asks the CRM to resolve the user's company name (Clerk org name -> user
+    metadata ``company`` -> "Viato" fallback). Returns ``{company}`` or ``None``
+    if it can't be resolved. Best-effort and independent of
+    ``VIATO_BILLING_ENABLED`` — the caller treats a missing value as "leave the
+    company unset" (the greeting then renders an empty company).
+    """
+    clerk_org_id = await _org_provider_id(user.selected_organization_id)
+    return await _post(
+        "/api/voice/crm-context",
+        {"clerk_user_id": user.provider_id, "clerk_org_id": clerk_org_id},
+    )
+
+
 async def maybe_report_viato_usage(workflow_run, cost_info: dict | None) -> None:
     """Post-call: report the call duration to the CRM so it debits tokens.
 

@@ -20,13 +20,24 @@ interface FolderFormDialogProps {
     /** Pre-fill the input (used when renaming). */
     initialName?: string;
     submitLabel: string;
+    /** Field label. Defaults to "Folder name" for the original folder usage. */
+    label?: string;
+    /** Input placeholder. Defaults to folder examples. */
+    placeholder?: string;
+    /**
+     * Allow submitting a value equal to ``initialName``. Off by default so a
+     * rename can't be a no-op; on for create-with-prefilled-default flows where
+     * accepting the suggested name verbatim is valid.
+     */
+    allowUnchanged?: boolean;
     /** Resolve to close the dialog; reject/throw to keep it open (e.g. on error). */
     onSubmit: (name: string) => Promise<void>;
 }
 
 /**
- * Shared single-field dialog used for both creating and renaming a folder.
- * Keeps name validation and the pending state in one place.
+ * Shared single-field name dialog. Used for creating/renaming a folder and for
+ * naming a new agent. Keeps name validation and the pending state in one place;
+ * the label/placeholder are overridable so it isn't folder-specific.
  */
 export function FolderFormDialog({
     open,
@@ -34,6 +45,9 @@ export function FolderFormDialog({
     title,
     initialName = '',
     submitLabel,
+    label = 'Folder name',
+    placeholder = 'e.g. Sales, Support, Onboarding',
+    allowUnchanged = false,
     onSubmit,
 }: FolderFormDialogProps) {
     const [name, setName] = useState(initialName);
@@ -45,7 +59,10 @@ export function FolderFormDialog({
     }, [open, initialName]);
 
     const trimmed = name.trim();
-    const canSubmit = trimmed.length > 0 && trimmed !== initialName.trim() && !isSubmitting;
+    const canSubmit =
+        trimmed.length > 0 &&
+        (allowUnchanged || trimmed !== initialName.trim()) &&
+        !isSubmitting;
 
     const handleSubmit = async () => {
         if (!canSubmit) return;
@@ -67,12 +84,12 @@ export function FolderFormDialog({
                     <DialogTitle>{title}</DialogTitle>
                 </DialogHeader>
                 <div className="space-y-2 py-2">
-                    <Label htmlFor="folder-name">Folder name</Label>
+                    <Label htmlFor="folder-name">{label}</Label>
                     <Input
                         id="folder-name"
                         value={name}
                         onChange={(e) => setName(e.target.value)}
-                        placeholder="e.g. Sales, Support, Onboarding"
+                        placeholder={placeholder}
                         maxLength={100}
                         autoFocus
                         onKeyDown={(e) => {

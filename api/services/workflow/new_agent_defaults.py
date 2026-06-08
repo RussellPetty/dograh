@@ -18,9 +18,12 @@ from __future__ import annotations
 import copy
 from typing import Any, Dict, List, Optional
 
-# Literal default greeting the user then edits (no interpolation here — the
-# placeholder text is shown verbatim in the editor).
-DEFAULT_GREETING_TEXT = "Hi! This is (name) with (company's name of the user)."
+# Default greeting the user then edits. Uses template variables that resolve at
+# call time: ``{{agent_name}}`` -> the workflow's name and ``{{company}}`` ->
+# the user's company (injected into the run's call context in
+# ``api/services/pipecat/run_pipeline.py``). Rendered by the engine's
+# ``_format_prompt`` (render_template over the call context).
+DEFAULT_GREETING_TEXT = "Hi! This is {{agent_name}} with {{company}}."
 
 
 def default_workflow_configurations() -> Dict[str, Any]:
@@ -74,7 +77,7 @@ def apply_new_agent_node_defaults(
 
     On the start node, fills (only when absent so an explicit author value
     wins):
-      - ``greeting`` / ``greeting_type`` -> the literal default greeting text
+      - ``greeting`` / ``greeting_type`` -> the default greeting template
       - ``allow_interrupt`` -> True
       - ``tool_uuids`` -> all of the org's active tool uuids (when provided and
         the node doesn't already declare tools)

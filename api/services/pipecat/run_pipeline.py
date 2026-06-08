@@ -433,6 +433,31 @@ async def _run_pipeline(
         **merged_call_context_vars,
         "runtime_configuration": runtime_configuration,
     }
+
+    # Greeting template variables (default greeting is
+    # "Hi! This is {{agent_name}} with {{company}}."). Only fill when absent so a
+    # caller-supplied value (e.g. campaign row, API caller) always wins.
+    #   - agent_name: the workflow's name. Always set.
+    #   - company: the user's company, fetched best-effort from the CRM
+    #     (Viato Voice / clerk deployments only). If it can't be resolved the
+    #     key is left unset and the greeting renders an empty company.
+    if "agent_name" not in merged_call_context_vars:
+        merged_call_context_vars["agent_name"] = workflow.name
+
+    if "company" not in merged_call_context_vars:
+        from api.constants import AUTH_PROVIDER
+
+        if AUTH_PROVIDER == "clerk":
+            from api.services.billing.viato_billing import fetch_crm_context
+
+            user_obj = await db_client.get_user_by_id(user_id)
+            crm_context = (
+                await fetch_crm_context(user_obj) if user_obj else None
+            )
+            company = (crm_context or {}).get("company")
+            if company:
+                merged_call_context_vars["company"] = company
+
     await db_client.update_workflow_run(
         workflow_run_id, initial_context=merged_call_context_vars
     )
