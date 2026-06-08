@@ -3,7 +3,9 @@
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from loguru import logger
 
+from api.constants import AUTH_PROVIDER
 from api.db import db_client
 from api.db.models import UserModel
 from api.enums import ToolCategory, ToolStatus
@@ -116,6 +118,19 @@ async def list_tools(
         validate_status(status)
     if category:
         validate_category(category)
+
+    # Viato Voice deployment: lazily seed the pre-built CRM tools (Create/Update
+    # Contact, Update Deal, Add Note) so every org has them on first Tools fetch.
+    # Idempotent + best-effort — must never break the tool listing.
+    if AUTH_PROVIDER == "clerk":
+        try:
+            from api.services.integrations.viato_crm_tools import (
+                ensure_viato_crm_tools,
+            )
+
+            await ensure_viato_crm_tools(user.selected_organization_id, user.id)
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Viato CRM tool seeding skipped: {e}")
 
     tools = await db_client.get_tools_for_organization(
         user.selected_organization_id,
