@@ -17,8 +17,24 @@ from api.services.telephony.status_processor import (
     StatusCallbackRequest,
     _process_status_update,
 )
+from api.utils.common import get_backend_endpoints
 
 router = APIRouter()
+
+
+async def _signed_request_url(request: Request) -> str:
+    """Rebuild the public URL the provider signed.
+
+    Behind a TLS-terminating proxy (nginx/traefik), ``request.url`` is the internal
+    ``http`` URL, which won't match the public ``https`` URL Twilio signed → the
+    signature check fails and the webhook 401s. The webhook URLs we hand to Twilio
+    are built from ``get_backend_endpoints()``, so validate against that same base.
+    """
+    backend, _ = await get_backend_endpoints()
+    url = f"{backend.rstrip('/')}{request.url.path}"
+    if request.url.query:
+        url = f"{url}?{request.url.query}"
+    return url
 
 
 @router.post("/twiml", include_in_schema=False)
@@ -39,7 +55,7 @@ async def handle_twiml_webhook(
     callback_data = dict(await request.form())
 
     is_valid = await provider.verify_inbound_signature(
-        str(request.url),
+        await _signed_request_url(request),
         callback_data,
         dict(request.headers),
     )
@@ -89,7 +105,7 @@ async def handle_twilio_status_callback(
     )
 
     is_valid = await provider.verify_inbound_signature(
-        str(request.url),
+        await _signed_request_url(request),
         callback_data,
         dict(request.headers),
     )

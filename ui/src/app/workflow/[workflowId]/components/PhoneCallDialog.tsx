@@ -315,7 +315,7 @@ export const PhoneCallDialog = ({
                 />
             ) : (
                 <PhoneInput
-                    defaultCountry="in"
+                    defaultCountry="us"
                     value={phoneNumber}
                     onChange={handlePhoneInputChange}
                 />
