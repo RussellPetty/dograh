@@ -10,7 +10,7 @@ from httpx import HTTPStatusError
 from loguru import logger
 from pydantic import BaseModel, Field, ValidationError
 
-from api.constants import DEPLOYMENT_MODE
+from api.constants import AUTH_PROVIDER, DEPLOYMENT_MODE
 from api.db import db_client
 from api.db.agent_trigger_client import TriggerPathConflictError
 from api.db.models import UserModel
@@ -45,6 +45,10 @@ from api.services.workflow.authoring import (
 )
 from api.services.workflow.dto import ReactFlowDTO, sanitize_workflow_definition
 from api.services.workflow.duplicate import duplicate_workflow
+from api.services.workflow.new_agent_defaults import (
+    apply_new_agent_node_defaults,
+    merged_default_configurations,
+)
 from api.services.workflow.errors import ItemKind, WorkflowError
 from api.services.workflow.trigger_paths import (
     TriggerPathIssue,
@@ -489,6 +493,37 @@ async def create_workflow(
     if trigger_path_issues:
         raise _trigger_path_validation_http_exception(trigger_path_issues)
 
+    # New-agent defaults (Viato Voice): turn all of the org's active tools on,
+    # pre-fill the greeting / allow-interruption on the start node, and seed
+    # ambient-noise + voicemail-detection config. Each is only filled when
+    # absent so an explicit caller value (API / super-agent) always wins.
+    org_id = user.selected_organization_id
+    tool_uuids: list[str] = []
+    if org_id is not None:
+        # In the Viato Voice (clerk) deployment the CRM tools are seeded lazily;
+        # ensure they exist before collecting uuids. Best-effort — must never
+        # block agent creation.
+        if AUTH_PROVIDER == "clerk":
+            try:
+                from api.services.integrations.viato_crm_tools import (
+                    ensure_viato_crm_tools,
+                )
+
+                await ensure_viato_crm_tools(org_id, user.id)
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"Viato CRM tool seeding skipped on create: {e}")
+        try:
+            active_tools = await db_client.get_tools_for_organization(
+                org_id, status="active"
+            )
+            tool_uuids = [tool.tool_uuid for tool in active_tools]
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Could not load org tools for new agent defaults: {e}")
+
+    workflow_definition = apply_new_agent_node_defaults(
+        workflow_definition, tool_uuids=tool_uuids
+    )
+
     # Validate trigger path uniqueness BEFORE creating the workflow so we
     # don't leave an orphaned workflow record when the trigger conflicts.
     trigger_paths = (
@@ -507,6 +542,7 @@ async def create_workflow(
         workflow_definition,
         user.id,
         user.selected_organization_id,
+        workflow_configurations=merged_default_configurations(None),
     )
 
     capture_event(

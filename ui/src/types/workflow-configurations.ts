@@ -19,7 +19,7 @@ export interface VoicemailDetectionConfiguration {
 }
 
 export const DEFAULT_VOICEMAIL_DETECTION_CONFIGURATION: VoicemailDetectionConfiguration = {
-    enabled: false,
+    enabled: true,
     use_workflow_llm: true,
     long_speech_timeout: 8.0,
 };
@@ -69,7 +69,7 @@ export interface WorkflowConfigurations {
 
 export const DEFAULT_WORKFLOW_CONFIGURATIONS: WorkflowConfigurations = {
     ambient_noise_configuration: {
-        enabled: false,
+        enabled: true,
         volume: 0.3
     },
     max_call_duration: 600,  // 10 minutes

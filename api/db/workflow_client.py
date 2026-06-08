@@ -27,6 +27,7 @@ class WorkflowClient(BaseDBClient):
         workflow_definition: dict,
         user_id: int,
         organization_id: int = None,
+        workflow_configurations: dict | None = None,
     ) -> WorkflowModel:
         async with self.async_session() as session:
             try:
@@ -36,6 +37,11 @@ class WorkflowClient(BaseDBClient):
                     user_id=user_id,
                     organization_id=organization_id,
                 )
+                # Seed initial workflow_configurations (e.g. default ambient noise
+                # / voicemail detection for new agents) when the caller supplies
+                # them. Existing callers pass nothing and keep the empty default.
+                if workflow_configurations is not None:
+                    new_workflow.workflow_configurations = workflow_configurations
                 session.add(new_workflow)
                 await session.flush()  # Flush to get the workflow ID
 
