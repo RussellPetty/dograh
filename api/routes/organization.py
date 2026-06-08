@@ -185,6 +185,58 @@ async def _run_preprocess_hook(provider: str, credentials: dict) -> dict:
     return credentials
 
 
+async def _import_provider_numbers(organization_id: int, config_id: int) -> int:
+    """Add the provider account's phone numbers to a config (idempotent, no inbound sync).
+
+    Best-effort: any provider/list error is swallowed so config creation/viewing never
+    fails on a transient API hiccup. US (+1) numbers are imported first so the default
+    caller ID prefers a US number. Does NOT repoint provider webhooks — inbound stays
+    wherever it is until a number is explicitly assigned to an agent.
+    """
+    try:
+        provider = await get_telephony_provider_by_id(config_id, organization_id)
+    except Exception as e:
+        logger.warning(f"Import numbers: provider load failed (config {config_id}): {e}")
+        return 0
+
+    lister = getattr(provider, "list_account_numbers", None)
+    if not lister:
+        return 0
+    try:
+        account_numbers = await lister()
+    except Exception as e:
+        logger.warning(f"Import numbers: list failed (config {config_id}): {e}")
+        return 0
+
+    existing_rows = await db_client.list_phone_numbers_for_config(config_id)
+    existing = {n.address for n in existing_rows}
+    has_default = any(getattr(n, "is_default_caller_id", False) for n in existing_rows)
+
+    # US (+1) first so the default caller ID lands on a US number.
+    account_numbers = sorted(
+        account_numbers, key=lambda a: 0 if str(a).startswith("+1") else 1
+    )
+    added = 0
+    for addr in account_numbers:
+        if addr in existing:
+            continue
+        make_default = not has_default
+        try:
+            await db_client.create_phone_number(
+                organization_id=organization_id,
+                telephony_configuration_id=config_id,
+                address=addr,
+                is_default_caller_id=make_default,
+            )
+            existing.add(addr)
+            if make_default:
+                has_default = True
+            added += 1
+        except IntegrityError:
+            pass
+    return added
+
+
 def _phone_number_to_response(
     row, inbound_workflow_name: Optional[str] = None
 ) -> PhoneNumberResponse:
@@ -351,11 +403,14 @@ async def auto_configure_telephony(user: UserModel = Depends(get_user)):
         )
         existing = next((r for r in rows if r.name == name), None)
         if existing:
+            await _import_provider_numbers(user.selected_organization_id, existing.id)
             return _detail_response(existing)
         raise HTTPException(
             status_code=409,
             detail="A telephony configuration with this name already exists.",
         )
+
+    await _import_provider_numbers(user.selected_organization_id, row.id)
 
     capture_event(
         distinct_id=str(user.provider_id),
@@ -369,6 +424,17 @@ async def auto_configure_telephony(user: UserModel = Depends(get_user)):
         },
     )
     return _detail_response(row)
+
+
+@router.post("/telephony-configs/{config_id}/import-numbers")
+async def import_telephony_numbers(
+    config_id: int, user: UserModel = Depends(get_user)
+):
+    """Import the provider account's phone numbers into this config (idempotent)."""
+    if not user.selected_organization_id:
+        raise HTTPException(status_code=400, detail="No organization selected")
+    added = await _import_provider_numbers(user.selected_organization_id, config_id)
+    return {"added": added}
 
 
 @router.get(

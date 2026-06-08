@@ -74,22 +74,27 @@ class UserConfigurationValidator:
         }
         status_list = []
 
+        # LLM is always required — used for variable extraction + QA even in realtime.
         status_list.extend(self._validate_service(configuration.llm, "llm"))
-        status_list.extend(self._validate_service(configuration.stt, "stt"))
-        status_list.extend(self._validate_service(configuration.tts, "tts"))
+
+        if configuration.is_realtime:
+            # The realtime model does STT + TTS + LLM in one turn, so separate
+            # stt/tts services are not used and must not be required.
+            status_list.extend(
+                self._validate_service(
+                    configuration.realtime, "realtime", required=True
+                )
+            )
+        else:
+            status_list.extend(self._validate_service(configuration.stt, "stt"))
+            status_list.extend(self._validate_service(configuration.tts, "tts"))
+
         # Embeddings is optional - only validate if configured
         status_list.extend(
             self._validate_service(
                 configuration.embeddings, "embeddings", required=False
             )
         )
-        # Realtime is optional - only validate if is_realtime is enabled
-        if configuration.is_realtime:
-            status_list.extend(
-                self._validate_service(
-                    configuration.realtime, "realtime", required=True
-                )
-            )
 
         if status_list:
             raise ValueError(status_list)

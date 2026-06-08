@@ -70,9 +70,9 @@ class TwilioProvider(TelephonyProvider):
 
         endpoint = f"{self.base_url}/Calls.json"
 
-        # Use provided from_number or select a random one
+        # Use provided from_number, else pick one (preferring a US caller ID).
         if from_number is None:
-            from_number = random.choice(self.from_numbers)
+            from_number = self._select_from_number()
         logger.info(f"Selected phone number {from_number} for outbound call")
         logger.info(f"Webhook url received - {webhook_url}")
 
@@ -141,6 +141,43 @@ class TwilioProvider(TelephonyProvider):
         Get list of available Twilio phone numbers.
         """
         return self.from_numbers
+
+    def _select_from_number(self) -> str:
+        """Pick an outbound caller ID, preferring US (+1) numbers when available."""
+        us = [n for n in self.from_numbers if str(n).startswith("+1")]
+        return random.choice(us or self.from_numbers)
+
+    async def list_account_numbers(self) -> List[str]:
+        """List every E.164 number owned by this Twilio account (for auto-import).
+
+        Unlike ``get_available_phone_numbers`` (which returns the configured
+        ``from_numbers``), this queries Twilio's IncomingPhoneNumbers resource for
+        all numbers on the account. Best-effort: returns [] on any API error.
+        """
+        if not (self.account_sid and self.auth_token):
+            return []
+        endpoint = f"{self.base_url}/IncomingPhoneNumbers.json"
+        try:
+            async with aiohttp.ClientSession() as session:
+                auth = aiohttp.BasicAuth(self.account_sid, self.auth_token)
+                async with session.get(
+                    endpoint, params={"PageSize": "100"}, auth=auth
+                ) as response:
+                    if response.status != 200:
+                        body = await response.text()
+                        logger.warning(
+                            f"Twilio list account numbers failed: {response.status} {body}"
+                        )
+                        return []
+                    data = await response.json()
+        except Exception as e:
+            logger.warning(f"Twilio list account numbers error: {e}")
+            return []
+        return [
+            n["phone_number"]
+            for n in (data.get("incoming_phone_numbers") or [])
+            if n.get("phone_number")
+        ]
 
     def validate_config(self) -> bool:
         """
@@ -583,8 +620,8 @@ class TwilioProvider(TelephonyProvider):
         if not self.validate_config():
             raise ValueError("Twilio provider not properly configured")
 
-        # Select a random phone number for the transfer
-        from_number = random.choice(self.from_numbers)
+        # Pick a phone number for the transfer (preferring a US caller ID).
+        from_number = self._select_from_number()
         logger.info(f"Selected phone number {from_number} for transfer call")
 
         backend_endpoint, _ = await get_backend_endpoints()

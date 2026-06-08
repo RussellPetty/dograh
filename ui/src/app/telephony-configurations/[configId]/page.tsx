@@ -11,9 +11,10 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
+import { client } from "@/client/client.gen";
 import {
   deletePhoneNumberApiV1OrganizationsTelephonyConfigsConfigIdPhoneNumbersPhoneNumberIdDelete,
   getTelephonyConfigurationByIdApiV1OrganizationsTelephonyConfigsConfigIdGet,
@@ -72,7 +73,9 @@ export default function TelephonyConfigurationDetailPage() {
   const params = useParams<{ configId: string }>();
   const configId = Number(params.configId);
 
-  const { user, getAccessToken, loading: authLoading } = useAuth();
+  const { user, getAccessToken, loading: authLoading, provider } = useAuth();
+  const isClerk = provider === "clerk";
+  const importTriedRef = useRef(false);
   const [config, setConfig] = useState<TelephonyConfigurationDetail | null>(null);
   const [phoneNumbers, setPhoneNumbers] = useState<PhoneNumberResponse[]>([]);
   const [loading, setLoading] = useState(true);
@@ -117,6 +120,25 @@ export default function TelephonyConfigurationDetailPage() {
   useEffect(() => {
     fetchAll();
   }, [fetchAll]);
+
+  // Embedded "Viato Voice": import the user's existing provider numbers once on load.
+  useEffect(() => {
+    if (!isClerk || loading || authLoading || !user || !configId || importTriedRef.current) return;
+    if (phoneNumbers.length > 0) return;
+    importTriedRef.current = true;
+    (async () => {
+      try {
+        const token = await getAccessToken();
+        const res = await client.post({
+          url: `/api/v1/organizations/telephony-configs/${configId}/import-numbers`,
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.error) await fetchAll();
+      } catch {
+        /* best-effort */
+      }
+    })();
+  }, [isClerk, loading, authLoading, user, configId, phoneNumbers.length, getAccessToken, fetchAll]);
 
   const onSetDefaultOutbound = async () => {
     if (!config) return;
