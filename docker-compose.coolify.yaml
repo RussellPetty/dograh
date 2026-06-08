@@ -128,6 +128,13 @@ services:
       - ui
       - api
       - minio
+    # Pin traefik to the coolify network when resolving this container's backend
+    # IP. nginx is on 3 networks (default, app_default, coolify); without this
+    # label traefik may latch onto a non-coolify IP and serve a STALE/unreachable
+    # backend after each redeploy (nginx gets a new IP) → 504 until the proxy is
+    # bounced. Coolify merges this with its auto-generated traefik labels.
+    labels:
+      - "traefik.docker.network=coolify"
     # Join Coolify's proxy network so traefik can route the public domain here.
     networks:
       - default
