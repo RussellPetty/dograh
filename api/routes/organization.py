@@ -9,6 +9,7 @@ from api.constants import DEFAULT_CAMPAIGN_RETRY_CONFIG, DEFAULT_ORG_CONCURRENCY
 from api.db import db_client
 from api.db.models import UserModel
 from api.db.telephony_configuration_client import TelephonyConfigurationInUseError
+from api.constants import AUTH_PROVIDER
 from api.enums import OrganizationConfigurationKey, PostHogEvent
 from api.schemas.telephony_config import (
     TelephonyConfigRequest,
@@ -28,6 +29,7 @@ from api.schemas.telephony_phone_number import (
 )
 from api.services.auth.depends import get_user
 from api.services.configuration.masking import is_mask_of, mask_key
+from api.services.billing.viato_billing import fetch_twilio_credentials
 from api.services.posthog_client import capture_event
 from api.services.telephony import registry as telephony_registry
 from api.services.telephony.factory import get_telephony_provider_by_id
@@ -297,6 +299,75 @@ async def create_telephony_configuration(
         },
     )
 
+    return _detail_response(row)
+
+
+@router.post("/telephony-configs/auto", response_model=TelephonyConfigurationDetail)
+async def auto_configure_telephony(user: UserModel = Depends(get_user)):
+    """Auto-create a Twilio telephony config from the user's Viato phone setup.
+
+    Embedded "Viato Voice" (clerk) only: resolves the Twilio credentials the user
+    already has in Viato CRM — their own (BYO) account, or Viato's shared/managed
+    account — and creates a Twilio telephony configuration. No manual provider or
+    credential entry. Idempotent: re-running returns the existing config.
+    """
+    if AUTH_PROVIDER != "clerk":
+        raise HTTPException(
+            status_code=404,
+            detail="Auto-configuration is only available on Viato Voice.",
+        )
+    if not user.selected_organization_id:
+        raise HTTPException(status_code=400, detail="No organization selected")
+
+    creds = await fetch_twilio_credentials(user)
+    if not creds or not creds.get("account_sid") or not creds.get("auth_token"):
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Could not resolve your Twilio credentials from Viato. Set up your "
+                "phone system in Viato first, then try again."
+            ),
+        )
+
+    source = creds.get("source") or "viato"
+    name = "Twilio (your account)" if source == "byo" else "Twilio (Viato)"
+    credentials = {
+        "account_sid": creds["account_sid"],
+        "auth_token": creds["auth_token"],
+    }
+
+    try:
+        row = await db_client.create_telephony_configuration(
+            organization_id=user.selected_organization_id,
+            name=name,
+            provider="twilio",
+            credentials=credentials,
+            is_default_outbound=True,
+        )
+    except IntegrityError:
+        # Already auto-configured — idempotent: return the existing config.
+        rows = await db_client.list_telephony_configurations(
+            user.selected_organization_id
+        )
+        existing = next((r for r in rows if r.name == name), None)
+        if existing:
+            return _detail_response(existing)
+        raise HTTPException(
+            status_code=409,
+            detail="A telephony configuration with this name already exists.",
+        )
+
+    capture_event(
+        distinct_id=str(user.provider_id),
+        event=PostHogEvent.TELEPHONY_CONFIGURED,
+        properties={
+            "provider": "twilio",
+            "organization_id": user.selected_organization_id,
+            "config_id": row.id,
+            "auto": True,
+            "source": source,
+        },
+    )
     return _detail_response(row)
 
 

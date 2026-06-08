@@ -14,6 +14,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 
+import { client } from "@/client/client.gen";
 import {
   deleteTelephonyConfigurationApiV1OrganizationsTelephonyConfigsConfigIdDelete,
   getTelephonyConfigurationByIdApiV1OrganizationsTelephonyConfigsConfigIdGet,
@@ -50,7 +51,8 @@ import { detailFromError } from "@/lib/apiError";
 import { useAuth } from "@/lib/auth";
 
 export default function TelephonyConfigurationsPage() {
-  const { user, getAccessToken, loading: authLoading } = useAuth();
+  const { user, getAccessToken, loading: authLoading, provider } = useAuth();
+  const isClerk = provider === "clerk";
   const {
     telnyxMissingWebhookPublicKeyCount,
     refresh: refreshWarnings,
@@ -64,6 +66,7 @@ export default function TelephonyConfigurationsPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] =
     useState<TelephonyConfigurationListItem | null>(null);
+  const [autoLoading, setAutoLoading] = useState(false);
 
   const fetchItems = useCallback(async () => {
     if (authLoading || !user) return;
@@ -89,6 +92,26 @@ export default function TelephonyConfigurationsPage() {
     await fetchItems();
     await refreshWarnings();
   }, [fetchItems, refreshWarnings]);
+
+  // Embedded "Viato Voice": telephony auto-configures from the user's Viato phone
+  // settings (their own Twilio, or Viato's) — no manual provider/credential entry.
+  const autoConfigure = useCallback(async () => {
+    setAutoLoading(true);
+    try {
+      const token = await getAccessToken();
+      const res = await client.post({
+        url: "/api/v1/organizations/telephony-configs/auto",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.error) throw new Error(detailFromError(res.error, "Auto-configuration failed"));
+      toast.success("Telephony configured from your Viato phone settings");
+      await onSaved();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Auto-configuration failed");
+    } finally {
+      setAutoLoading(false);
+    }
+  }, [getAccessToken, onSaved]);
 
   useEffect(() => {
     fetchItems();
@@ -153,22 +176,36 @@ export default function TelephonyConfigurationsPage() {
         <div className="flex items-start justify-between gap-4 mb-6">
           <div>
             <h1 className="text-3xl font-bold mb-2">Telephony configurations</h1>
-            <p className="text-muted-foreground">
-              Connect one or more telephony provider accounts. Each campaign uses one
-              configuration; inbound calls are routed to the right one by account ID.{" "}
-              <a
-                href="https://viato.ai/docs"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-0.5 underline"
-              >
-                Learn more <ExternalLink className="h-3 w-3" />
-              </a>
-            </p>
+            {isClerk ? (
+              <p className="text-muted-foreground">
+                Your telephony is set up automatically from your Viato phone settings —
+                your own Twilio if you&apos;ve connected one, otherwise Viato&apos;s. Click
+                Auto-configure to create it. Phone numbers are added afterward.
+              </p>
+            ) : (
+              <p className="text-muted-foreground">
+                Connect one or more telephony provider accounts. Each campaign uses one
+                configuration; inbound calls are routed to the right one by account ID.{" "}
+                <a
+                  href="https://viato.ai/docs"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-0.5 underline"
+                >
+                  Learn more <ExternalLink className="h-3 w-3" />
+                </a>
+              </p>
+            )}
           </div>
-          <Button onClick={() => setCreateOpen(true)}>
-            <Plus className="h-4 w-4 mr-2" /> Add configuration
-          </Button>
+          {isClerk ? (
+            <Button onClick={autoConfigure} disabled={autoLoading}>
+              <Plus className="h-4 w-4 mr-2" /> {autoLoading ? "Configuring…" : "Auto-configure"}
+            </Button>
+          ) : (
+            <Button onClick={() => setCreateOpen(true)}>
+              <Plus className="h-4 w-4 mr-2" /> Add configuration
+            </Button>
+          )}
         </div>
 
         {telnyxMissingWebhookPublicKeyCount > 0 && (
@@ -204,13 +241,21 @@ export default function TelephonyConfigurationsPage() {
             <CardHeader>
               <CardTitle>No telephony configurations yet</CardTitle>
               <CardDescription>
-                Add one to enable outbound calls and receive inbound calls.
+                {isClerk
+                  ? "Auto-configure to enable outbound and inbound calls using your Viato phone settings."
+                  : "Add one to enable outbound calls and receive inbound calls."}
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <Button onClick={() => setCreateOpen(true)}>
-                <Plus className="h-4 w-4 mr-2" /> Add configuration
-              </Button>
+              {isClerk ? (
+                <Button onClick={autoConfigure} disabled={autoLoading}>
+                  <Plus className="h-4 w-4 mr-2" /> {autoLoading ? "Configuring…" : "Auto-configure"}
+                </Button>
+              ) : (
+                <Button onClick={() => setCreateOpen(true)}>
+                  <Plus className="h-4 w-4 mr-2" /> Add configuration
+                </Button>
+              )}
             </CardContent>
           </Card>
         ) : (
@@ -266,14 +311,16 @@ export default function TelephonyConfigurationsPage() {
                         <Star className="h-4 w-4" />
                       </Button>
                     )}
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => onEdit(item)}
-                      title="Edit"
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </Button>
+                    {!isClerk && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => onEdit(item)}
+                        title="Edit"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                    )}
                     <Button
                       variant="ghost"
                       size="sm"
@@ -297,18 +344,22 @@ export default function TelephonyConfigurationsPage() {
         )}
       </div>
 
-      <ConfigFormDialog
-        open={createOpen}
-        onOpenChange={setCreateOpen}
-        existing={null}
-        onSaved={onSaved}
-      />
-      <ConfigFormDialog
-        open={editOpen}
-        onOpenChange={setEditOpen}
-        existing={editTarget}
-        onSaved={onSaved}
-      />
+      {!isClerk && (
+        <ConfigFormDialog
+          open={createOpen}
+          onOpenChange={setCreateOpen}
+          existing={null}
+          onSaved={onSaved}
+        />
+      )}
+      {!isClerk && (
+        <ConfigFormDialog
+          open={editOpen}
+          onOpenChange={setEditOpen}
+          existing={editTarget}
+          onSaved={onSaved}
+        />
+      )}
 
       <AlertDialog
         open={!!deleteTarget}

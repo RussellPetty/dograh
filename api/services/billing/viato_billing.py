@@ -101,6 +101,22 @@ async def check_balance_for_user(user: UserModel) -> bool:
     return bool(data.get("allowed", True))
 
 
+async def fetch_twilio_credentials(user: UserModel) -> Optional[dict]:
+    """Resolve which Twilio account this user's "Viato Voice" telephony should use.
+
+    Asks the CRM (which owns the user's phone setup): BYO Twilio users get their
+    own account; ViatoPhone / "use our Twilio" users get Viato's shared/managed
+    account. Returns ``{account_sid, auth_token, from_numbers, source}`` or
+    ``None`` if it can't be resolved. Independent of ``VIATO_BILLING_ENABLED`` —
+    telephony auto-config doesn't depend on token billing being on.
+    """
+    clerk_org_id = await _org_provider_id(user.selected_organization_id)
+    return await _post(
+        "/api/voice/twilio-credentials",
+        {"clerk_user_id": user.provider_id, "clerk_org_id": clerk_org_id},
+    )
+
+
 async def maybe_report_viato_usage(workflow_run, cost_info: dict | None) -> None:
     """Post-call: report the call duration to the CRM so it debits tokens.
 
