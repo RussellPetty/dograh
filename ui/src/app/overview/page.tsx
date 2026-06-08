@@ -25,15 +25,9 @@ export default function OverviewPage() {
                             )}
                         </CardTitle>
                         <CardDescription className="text-lg mt-2">
-                            {provider === 'clerk' ? (
-                                "Build, manage, and deploy your AI voice agents."
-                            ) : isOSSMode ? (
-                                <>
-                                    Open source alternative to Vapi. Help us support the project by giving us a star on GitHub.
-                                </>
-                            ) : (
-                                "Get started with building voice AI workflows"
-                            )}
+                            {provider === 'stack'
+                                ? "Get started with building voice AI workflows"
+                                : "Build, manage, and deploy your AI voice agents."}
                         </CardDescription>
                     </CardHeader>
                     <CardContent>
