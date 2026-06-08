@@ -35,6 +35,17 @@ DEFAULT_SERVICE_PROVIDERS = {
     field: provider for field, (provider, _) in _DEFAULTS.items()
 }
 
+# Providers exposed in the model-configuration UI on the hosted "Viato Voice"
+# (clerk) deployment — only those Viato supplies keys for. tts/embeddings are
+# intentionally empty (voice is handled by the realtime model, Grok).
+CLERK_SUPPORTED_PROVIDERS: dict[str, set[str]] = {
+    "llm": {ServiceProviders.OPENROUTER.value},
+    "tts": set(),
+    "stt": {ServiceProviders.DEEPGRAM.value},
+    "embeddings": set(),
+    "realtime": {ServiceProviders.GROK_REALTIME.value},
+}
+
 
 def build_clerk_default_configuration() -> Optional[UserConfiguration]:
     """Default service config for a new "Viato Voice" (clerk-mode) organization.
@@ -100,6 +111,7 @@ def build_clerk_default_configuration() -> Optional[UserConfiguration]:
 
 
 __all__ = [
+    "CLERK_SUPPORTED_PROVIDERS",
     "DEFAULT_SERVICE_PROVIDERS",
     "build_clerk_default_configuration",
 ]

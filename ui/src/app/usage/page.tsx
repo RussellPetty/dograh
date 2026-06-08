@@ -409,12 +409,13 @@ export default function UsagePage() {
                     </div>
                 </div>
 
-                {/* MPS Credits Card */}
+                {/* MPS Credits Card — hidden on the embedded "Viato Voice" deployment (Viato billing) */}
+                {auth.provider !== 'clerk' && (
                 <Card className="mb-6">
                     <CardHeader>
-                        <CardTitle>Dograh Model Credits</CardTitle>
+                        <CardTitle>Viato Voice Model Credits</CardTitle>
                         <CardDescription>
-                            These track usage of Dograh models using Dograh Service Keys.
+                            These track usage of Viato Voice models using Viato Voice Service Keys.
                         </CardDescription>
                     </CardHeader>
                     <CardContent>
@@ -444,10 +445,11 @@ export default function UsagePage() {
                                 )}
                             </div>
                         ) : (
-                            <p className="text-muted-foreground">No Dograh service keys configured. Set up a service key in your model configuration to see usage.</p>
+                            <p className="text-muted-foreground">No Viato Voice service keys configured. Set up a service key in your model configuration to see usage.</p>
                         )}
                     </CardContent>
                 </Card>
+                )}
 
                 {/* Daily Usage Table - Only for paid organizations */}
                 {organizationPricing?.price_per_second_usd && (

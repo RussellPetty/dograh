@@ -15,7 +15,10 @@ from api.services.configuration.check_validity import (
     APIKeyStatusResponse,
     UserConfigurationValidator,
 )
-from api.services.configuration.defaults import DEFAULT_SERVICE_PROVIDERS
+from api.services.configuration.defaults import (
+    CLERK_SUPPORTED_PROVIDERS,
+    DEFAULT_SERVICE_PROVIDERS,
+)
 from api.services.configuration.masking import check_for_masked_keys, mask_user_config
 from api.services.configuration.merge import merge_user_configurations
 from api.services.configuration.registry import REGISTRY, ServiceType
@@ -63,6 +66,17 @@ async def get_default_configurations() -> DefaultConfigurationsResponse:
         },
         "default_providers": DEFAULT_SERVICE_PROVIDERS,
     }
+
+    # On the hosted "Viato Voice" (clerk) deployment, only expose the providers
+    # Viato supplies keys for — hide everything else from the model-config UI.
+    if AUTH_PROVIDER == "clerk":
+        for service, allowed in CLERK_SUPPORTED_PROVIDERS.items():
+            configurations[service] = {
+                provider: schema
+                for provider, schema in configurations[service].items()
+                if provider in allowed
+            }
+
     return configurations
 
 

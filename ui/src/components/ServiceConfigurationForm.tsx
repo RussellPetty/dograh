@@ -834,10 +834,17 @@ export function ServiceConfigurationForm({
     };
 
     const getVisibleTabs = () => {
+        let tabs;
         if (mode === 'override') {
-            return isRealtime ? OVERRIDE_REALTIME_TABS : OVERRIDE_STANDARD_TABS;
+            tabs = isRealtime ? OVERRIDE_REALTIME_TABS : OVERRIDE_STANDARD_TABS;
+        } else {
+            tabs = isRealtime ? REALTIME_TABS : STANDARD_TABS;
         }
-        return isRealtime ? REALTIME_TABS : STANDARD_TABS;
+        // Viato Voice supplies keys only for Grok realtime + OpenRouter LLM + Deepgram STT.
+        if (authProvider === 'clerk') {
+            tabs = tabs.filter((t) => t.key !== 'tts' && t.key !== 'embeddings');
+        }
+        return tabs;
     };
 
     const visibleTabs = getVisibleTabs();
@@ -845,7 +852,8 @@ export function ServiceConfigurationForm({
 
     return (
         <form onSubmit={handleSubmit(onSubmit)}>
-            {/* Realtime toggle */}
+            {/* Realtime toggle — hidden on Viato Voice (Grok realtime is the only voice) */}
+            {authProvider !== 'clerk' && (
             <div className="flex items-center justify-between mb-4 p-4 border rounded-lg">
                 <div>
                     <Label htmlFor="realtime-toggle" className="text-sm font-medium">
@@ -861,6 +869,7 @@ export function ServiceConfigurationForm({
                     onCheckedChange={setIsRealtime}
                 />
             </div>
+            )}
 
             <Card>
                 <CardContent className="pt-6">

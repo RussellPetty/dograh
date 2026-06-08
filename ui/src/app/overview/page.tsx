@@ -90,7 +90,7 @@ export default function OverviewPage() {
                         <div className="flex flex-wrap gap-4">
                             <Button asChild variant="outline">
                                 <a
-                                    href="https://docs.dograh.com"
+                                    href="https://viato.ai/docs"
                                     target="_blank"
                                     rel="noopener noreferrer"
                                 >
