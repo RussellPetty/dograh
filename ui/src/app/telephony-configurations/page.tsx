@@ -11,7 +11,7 @@ import {
   Trash2,
 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { client } from "@/client/client.gen";
@@ -67,6 +67,7 @@ export default function TelephonyConfigurationsPage() {
   const [deleteTarget, setDeleteTarget] =
     useState<TelephonyConfigurationListItem | null>(null);
   const [autoLoading, setAutoLoading] = useState(false);
+  const autoTriedRef = useRef(false);
 
   const fetchItems = useCallback(async () => {
     if (authLoading || !user) return;
@@ -112,6 +113,16 @@ export default function TelephonyConfigurationsPage() {
       setAutoLoading(false);
     }
   }, [getAccessToken, onSaved]);
+
+  // Embedded "Viato Voice": auto-run configuration on first load when none exists,
+  // so the user never has to click. Runs once per mount.
+  useEffect(() => {
+    if (!isClerk || loading || authLoading || autoTriedRef.current) return;
+    if (items.length === 0) {
+      autoTriedRef.current = true;
+      autoConfigure();
+    }
+  }, [isClerk, loading, authLoading, items, autoConfigure]);
 
   useEffect(() => {
     fetchItems();
@@ -179,8 +190,8 @@ export default function TelephonyConfigurationsPage() {
             {isClerk ? (
               <p className="text-muted-foreground">
                 Your telephony is set up automatically from your Viato phone settings —
-                your own Twilio if you&apos;ve connected one, otherwise Viato&apos;s. Click
-                Auto-configure to create it. Phone numbers are added afterward.
+                your own Twilio if you&apos;ve connected one, otherwise Viato&apos;s. Phone
+                numbers are added afterward.
               </p>
             ) : (
               <p className="text-muted-foreground">
