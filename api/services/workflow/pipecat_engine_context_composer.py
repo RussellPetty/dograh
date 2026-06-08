@@ -53,6 +53,7 @@ def compose_system_prompt_for_node(
     format_prompt: Callable[[str], str],
     has_recordings: bool,
     call_objective: Optional[str] = None,
+    tools_block: Optional[str] = None,
 ) -> str:
     """Compose the full system prompt text for a workflow node.
 
@@ -79,6 +80,11 @@ def compose_system_prompt_for_node(
     # The per-call objective (reason/goals for THIS call) leads, so the agent
     # pursues the call's purpose regardless of what the node prompt says.
     parts = [p for p in (call_objective, global_prompt, formatted_node_prompt) if p]
+
+    # Make the agent aware of the tools it can call — function schemas alone are
+    # often not enough for it to reach for them mid-conversation.
+    if tools_block:
+        parts.append(tools_block)
 
     if has_recordings and "RECORDING_ID:" in formatted_node_prompt:
         parts.append(RECORDING_RESPONSE_MODE_INSTRUCTIONS)

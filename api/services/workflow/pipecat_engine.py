@@ -555,12 +555,18 @@ class PipecatEngine:
             await self._register_knowledge_base_function(node.document_uuids)
 
         # Compose prompt and functions via the context composer module
+        tools_block = (
+            await self._custom_tool_manager.describe_enabled_tools(node.tool_uuids)
+            if self._custom_tool_manager and node.tool_uuids
+            else None
+        )
         system_prompt = compose_system_prompt_for_node(
             node=node,
             workflow=self.workflow,
             format_prompt=self._format_prompt,
             has_recordings=self._has_recordings,
             call_objective=self._call_objective_prompt(),
+            tools_block=tools_block,
         )
         functions = await compose_functions_for_node(
             node=node,

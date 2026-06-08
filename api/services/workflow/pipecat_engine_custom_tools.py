@@ -202,6 +202,41 @@ class CustomToolManager:
             logger.error(f"Failed to fetch custom tools: {e}")
             return []
 
+    async def describe_enabled_tools(
+        self,
+        tool_uuids: list[str],
+    ) -> Optional[str]:
+        """Build a system-prompt block describing the node's enabled tools.
+
+        Function schemas already tell the model the tools exist, but that alone is
+        often not enough for it to actually reach for them. Surfacing each tool's
+        name + description in the instructions makes the agent aware it can (and
+        should) use them. Returns ``None`` when there are no tools.
+        """
+        if not tool_uuids:
+            return None
+        organization_id = await self.get_organization_id()
+        if not organization_id:
+            return None
+        try:
+            tools = await db_client.get_tools_by_uuids(tool_uuids, organization_id)
+        except Exception as e:
+            logger.warning(f"Could not describe enabled tools: {e}")
+            return None
+
+        lines: list[str] = []
+        for tool in tools:
+            desc = (tool.description or "").strip()
+            lines.append(f"- {tool.name}: {desc}" if desc else f"- {tool.name}")
+        if not lines:
+            return None
+        return (
+            "# Tools available to you\n"
+            "You can call these tools during the call. Use one as soon as it helps "
+            "accomplish the call's objective — do not announce that you are using a "
+            "tool, just call it.\n" + "\n".join(lines)
+        )
+
     async def register_handlers(
         self,
         tool_uuids: list[str],
